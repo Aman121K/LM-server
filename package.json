@@ -4,7 +4,7 @@
   "description": "Lead Management System Backend",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node server",
     "dev": "nodemon src/index.js"
   },
   "keywords": [],
