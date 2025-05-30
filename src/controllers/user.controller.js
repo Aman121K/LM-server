@@ -95,7 +95,7 @@ exports.login = async (req, res) => {
                     fullName: user.FullName,
                     username: user.Username,
                     email: user.UserEmail,
-                    userType: user.UserType
+                    userType: user.usertype
                 }
             }
         });
