@@ -1,6 +1,7 @@
 const db = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
 
 // Register a new user
 exports.register = async (req, res) => {
@@ -152,6 +153,75 @@ exports.getCurrentUser = async (req, res) => {
         res.status(400).json({
             success: false,
             message: error.message
+        });
+    }
+};
+
+// Forgot Password
+exports.forgotPassword = async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        // Check if user exists
+        const [users] = await db.execute(
+            'SELECT * FROM tblusers WHERE UserEmail = ?',
+            [email]
+        );
+
+        if (users.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'No user found with this email'
+            });
+        }
+
+        // Generate a random password
+        const newPassword = Math.random().toString(36).slice(-8);
+
+        // Hash the new password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        // Update user's password in database
+        await db.execute(
+            'UPDATE tblusers SET Password = ? WHERE UserEmail = ?',
+            [hashedPassword, email]
+        );
+
+        // Create email transporter
+        const transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: 'javascript.pgl@gmail.com',
+                pass: process.env.EMAIL_PASSWORD
+            }
+        });
+
+        // Email content
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: email,
+            subject: 'Password Reset - Lead Management System',
+            html: `
+                <h1>Password Reset</h1>
+                <p>Your new password is: <strong>${newPassword}</strong></p>
+                <p>Please login with this password and change it immediately for security reasons.</p>
+                <p>If you didn't request this password reset, please contact support immediately.</p>
+            `
+        };
+
+        // Send email
+        await transporter.sendMail(mailOptions);
+
+        res.status(200).json({
+            success: true,
+            message: 'New password has been sent to your email'
+        });
+    } catch (error) {
+        console.error('Forgot password error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error processing password reset'
         });
     }
 }; 
