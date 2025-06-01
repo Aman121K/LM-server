@@ -132,9 +132,10 @@ exports.logout = async (req, res) => {
 
 // Get current user
 exports.getCurrentUser = async (req, res) => {
+    console.log("Current users ",req);
     try {
         const [users] = await db.execute(
-            'SELECT id, FullName, Username, UserEmail FROM tblusers WHERE id = ?',
+            'SELECT * FROM tblusers WHERE id = ?',
             [req.user.id]
         );
 
@@ -250,3 +251,203 @@ exports.getTlUser=async(req,res)=>{
         });
     }
 }
+exports.allUserList=async(req,res)=>{
+    try {
+        const [users] = await db.execute(
+            'SELECT * FROM tblusers order by id desc'
+        );
+        res.status(200).json({
+            success: true,
+            data: users
+        });
+    } catch (error) {
+        res.status(400).json({
+            success: false,
+            message: error.message
+        });
+    }   
+}
+
+// Delete User
+exports.deleteUser = async (req, res) => {
+    try {
+        const userId = req.params.id;
+
+        // Check if user exists
+        const [users] = await db.execute(
+            'SELECT * FROM tblusers WHERE id = ?',
+            [userId]
+        );
+
+        if (users.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        // Delete user
+        await db.execute(
+            'DELETE FROM tblusers WHERE id = ?',
+            [userId]
+        );
+
+        res.status(200).json({
+            success: true,
+            message: 'User deleted successfully'
+        });
+    } catch (error) {
+        console.error('Delete user error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error deleting user'
+        });
+    }
+};
+
+// Update User
+exports.updateUser = async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const { fullName, username, email, password, userType } = req.body;
+
+        // Check if user exists
+        const [users] = await db.execute(
+            'SELECT * FROM tblusers WHERE id = ?',
+            [userId]
+        );
+
+        if (users.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        // Check if new username or email already exists for other users
+        if (username || email) {
+            const [existingUsers] = await db.execute(
+                'SELECT * FROM tblusers WHERE (Username = ? OR UserEmail = ?) AND id != ?',
+                [username || users[0].Username, email || users[0].UserEmail, userId]
+            );
+
+            if (existingUsers.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Username or email already exists'
+                });
+            }
+        }
+
+        // Prepare update data
+        const updateData = {
+            FullName: fullName || users[0].FullName,
+            Username: username || users[0].Username,
+            UserEmail: email || users[0].UserEmail,
+            usertype: userType || users[0].usertype
+        };
+
+        // If password is provided, hash it
+        if (password) {
+            const salt = await bcrypt.genSalt(10);
+            updateData.Password = await bcrypt.hash(password, salt);
+        }
+
+        // Update user
+        await db.execute(
+            'UPDATE tblusers SET FullName = ?, Username = ?, UserEmail = ?, usertype = ?' + 
+            (password ? ', Password = ?' : '') + 
+            ' WHERE id = ?',
+            [
+                updateData.FullName,
+                updateData.Username,
+                updateData.UserEmail,
+                updateData.usertype,
+                ...(password ? [updateData.Password] : []),
+                userId
+            ]
+        );
+
+        res.status(200).json({
+            success: true,
+            message: 'User updated successfully',
+            data: {
+                id: userId,
+                fullName: updateData.FullName,
+                username: updateData.Username,
+                email: updateData.UserEmail,
+                userType: updateData.usertype
+            }
+        });
+    } catch (error) {
+        console.error('Update user error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error updating user'
+        });
+    }
+};
+
+// Get User Reports
+exports.getUserReports = async (req, res) => {
+    try {
+        const { callby } = req.params;
+
+        // Get total data count
+        const [totalData] = await db.execute(
+            'SELECT COUNT(*) as TotalData FROM tblmaster WHERE callby = ?',
+            [callby]
+        );
+
+        // Get calling done count
+        const [callingDone] = await db.execute(
+            'SELECT COUNT(*) as callingdone FROM tblmaster WHERE callby = ? AND callstatus = "Done"',
+            [callby]
+        );
+
+        // Get pending count
+        const [pending] = await db.execute(
+            'SELECT COUNT(*) as pending FROM tblmaster WHERE callby = ? AND callstatus != "Done"',
+            [callby]
+        );
+
+        // Get calling status distribution
+        const [callStatus] = await db.execute(
+            'SELECT callstatus, COUNT(*) as tcount FROM tblmaster WHERE callby = ? GROUP BY callstatus',
+            [callby]
+        );
+
+        // Get calling done by date
+        const [callSubmitOn] = await db.execute(
+            'SELECT DATE(submiton) as submiton, COUNT(*) as sbcount FROM tblmaster WHERE callby = ? AND callstatus = "Done" GROUP BY DATE(submiton) ORDER BY submiton DESC',
+            [callby]
+        );
+        
+        console.log("callSubmitOn",callSubmitOn);
+        res.status(200).json({
+            success: true,
+            data: {
+                database: {
+                    totalData: totalData[0].TotalData || 0,
+                    callingDone: callingDone[0].callingdone || 0,
+                    pending: pending[0].pending || 0
+                },
+                callingStatus: callStatus.map(status => ({
+                    callstatus: status.callstatus,
+                    count: status.tcount
+                })),
+                callingDoneByDate: callSubmitOn.map(record => ({
+                    // console.log("callSubmitOn",record)
+                    date: record.submiton,
+                    count: record.sbcount
+                }))
+            }
+        });
+    } catch (error) {
+        console.error('Get user reports error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching user reports'
+        });
+    }
+};

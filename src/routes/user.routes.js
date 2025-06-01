@@ -8,9 +8,14 @@ router.post('/register', userController.register);
 router.post('/login', userController.login);
 router.post('/forgot-password', userController.forgotPassword);
 router.get('/tl', userController.getTlUser);
+router.get('/allUserList', userController.allUserList);
+
 
 // Protected routes
 router.post('/logout', auth, userController.logout);
 router.get('/me', auth, userController.getCurrentUser);
+router.delete('/:id', auth, userController.deleteUser);
+router.put('/:id', auth, userController.updateUser);
+router.get('/reports/:callby', auth, userController.getUserReports);
 
 module.exports = router; 
