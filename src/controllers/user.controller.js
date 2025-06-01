@@ -224,4 +224,29 @@ exports.forgotPassword = async (req, res) => {
             message: 'Error processing password reset'
         });
     }
-}; 
+};
+exports.getTlUser=async(req,res)=>{
+    try {
+        const [users] = await db.execute(
+            'SELECT id, FullName, Username, UserEmail FROM tblusers WHERE usertype = ?',
+            ['TL']
+        );
+
+        if (users.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'No TL users found'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            data: users
+        });
+    } catch (error) {
+        res.status(400).json({
+            success: false,
+            message: error.message
+        });
+    }
+}
