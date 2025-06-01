@@ -40,28 +40,50 @@ exports.createLead = async (req, res) => {
 // Get all leads for a specific call status
 exports.getLeadsByCallStatus = async (req, res) => {
     try {
-        const { callStatus, callBy, startDate, endDate } = req.query;
-        let query = 'SELECT * FROM tblmaster WHERE callby = ?';
-        const params = [callBy];
+        const { callStatus, callby, startDate, endDate } = req.query;
+        console.log("Query params:", { callStatus, callby, startDate, endDate });
 
-        if (callStatus) {
-            query += ' AND callstatus = ?';
-            params.push(callStatus);
+        // Start with base query
+        let query = 'SELECT * FROM tblmaster';
+        const params = [];
+        const conditions = [];
+
+        // Add conditions based on parameters
+        if (callby) {
+            conditions.push('callby = ?');
+            params.push(callby);
         }
 
-        if (startDate && endDate) {
-            query += ' AND followup BETWEEN ? AND ?';
-            params.push(startDate, endDate);
+        // if (callStatus) {
+        //     conditions.push('callstatus = ?');
+        //     params.push(callStatus);
+        // }
+
+        // if (startDate && endDate) {
+        //     conditions.push('DATE(submiton) BETWEEN ? AND ?');
+        //     params.push(startDate, endDate);
+        // }
+
+        // Add WHERE clause if there are any conditions
+        if (conditions.length > 0) {
+            query += ' WHERE ' + conditions.join(' AND ');
         }
 
+        // Add order by
         query += ' ORDER BY id DESC';
 
+        console.log("Final query:", query);
+        console.log("Query params:", params);
+
         const [leads] = await db.execute(query, params);
+        console.log("Query results:", leads.length, "leads found");
+
         res.status(200).json({
             success: true,
             data: leads
         });
     } catch (error) {
+        console.error("Error in getLeadsByCallStatus:", error);
         res.status(400).json({
             success: false,
             message: error.message
@@ -279,4 +301,81 @@ exports.getLeadsByBudget = async (req, res) => {
             message: error.message
         });
     }
-}; 
+};
+
+exports.allCallStatus=async(req,res)=>{
+    try {
+        const [callStatus] = await db.execute(
+            'SELECT * FROM callStatus ORDER BY id DESC',
+        );
+        res.status(200).json({
+            success: true,
+            data: callStatus
+        });
+    } catch (error) {
+        res.status(400).json({
+            success: false,
+            message: error.message
+        });
+    }
+}
+
+// Get Filtered Leads
+exports.getFilteredLeads = async (req, res) => {
+    try {
+        const { startDate, endDate, callStatus, callby } = req.query;
+
+        // Build the query conditions
+        let conditions = [];
+        let params = [];
+
+        if (startDate && endDate) {
+            conditions.push('DATE(submiton) BETWEEN ? AND ?');
+            params.push(startDate, endDate);
+        }
+
+        if (callStatus) {
+            conditions.push('callstatus = ?');
+            params.push(callStatus);
+        }
+
+        if (callby) {
+            conditions.push('callby = ?');
+            params.push(callby);
+        }
+
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+        // Get filtered leads
+        const [leads] = await db.execute(
+            `SELECT * FROM tblmaster ${whereClause} ORDER BY submiton DESC`,
+            params
+        );
+
+        // Get total count
+        const [totalCount] = await db.execute(
+            `SELECT COUNT(*) as total FROM tblmaster ${whereClause}`,
+            params
+        );
+
+        res.status(200).json({
+            success: true,
+            data: {
+                leads,
+                total: totalCount[0].total,
+                filters: {
+                    startDate,
+                    endDate,
+                    callStatus,
+                    callby
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Get filtered leads error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching filtered leads'
+        });
+    }
+};

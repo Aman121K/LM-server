@@ -393,6 +393,13 @@ exports.getUserReports = async (req, res) => {
     try {
         const { callby } = req.params;
 
+        if (!callby) {
+            return res.status(400).json({
+                success: false,
+                message: 'Callby parameter is required'
+            });
+        }
+
         // Get total data count
         const [totalData] = await db.execute(
             'SELECT COUNT(*) as TotalData FROM tblmaster WHERE callby = ?',
@@ -401,45 +408,45 @@ exports.getUserReports = async (req, res) => {
 
         // Get calling done count
         const [callingDone] = await db.execute(
-            'SELECT COUNT(*) as callingdone FROM tblmaster WHERE callby = ? AND callstatus = "Done"',
-            [callby]
+            'SELECT COUNT(*) as callingdone FROM tblmaster WHERE callby = ? AND callstatus = ?',
+            [callby, 'Done']
         );
 
         // Get pending count
         const [pending] = await db.execute(
-            'SELECT COUNT(*) as pending FROM tblmaster WHERE callby = ? AND callstatus != "Done"',
-            [callby]
+            'SELECT COUNT(*) as pending FROM tblmaster WHERE callby = ? AND (callstatus IS NULL OR callstatus != ?)',
+            [callby, 'Done']
         );
 
         // Get calling status distribution
         const [callStatus] = await db.execute(
-            'SELECT callstatus, COUNT(*) as tcount FROM tblmaster WHERE callby = ? GROUP BY callstatus',
+            'SELECT COALESCE(callstatus, "Not Called") as callstatus, COUNT(*) as tcount FROM tblmaster WHERE callby = ? GROUP BY callstatus',
             [callby]
         );
 
         // Get calling done by date
         const [callSubmitOn] = await db.execute(
-            'SELECT DATE(submiton) as submiton, COUNT(*) as sbcount FROM tblmaster WHERE callby = ? AND callstatus = "Done" GROUP BY DATE(submiton) ORDER BY submiton DESC',
-            [callby]
+            'SELECT DATE(submiton) as submiton, COUNT(*) as sbcount FROM tblmaster WHERE callby = ? AND callstatus = ? AND submiton IS NOT NULL GROUP BY DATE(submiton) ORDER BY submiton DESC',
+            [callby, 'Done']
         );
-        
-        console.log("callSubmitOn",callSubmitOn);
+
+        console.log("callSubmitOn", callSubmitOn);
+
         res.status(200).json({
             success: true,
             data: {
                 database: {
-                    totalData: totalData[0].TotalData || 0,
-                    callingDone: callingDone[0].callingdone || 0,
-                    pending: pending[0].pending || 0
+                    totalData: totalData[0]?.TotalData || 0,
+                    callingDone: callingDone[0]?.callingdone || 0,
+                    pending: pending[0]?.pending || 0
                 },
                 callingStatus: callStatus.map(status => ({
-                    callstatus: status.callstatus,
-                    count: status.tcount
+                    callstatus: status.callstatus || 'Not Called',
+                    count: status.tcount || 0
                 })),
                 callingDoneByDate: callSubmitOn.map(record => ({
-                    // console.log("callSubmitOn",record)
-                    date: record.submiton,
-                    count: record.sbcount
+                    date: record.submiton ? new Date(record.submiton).toISOString().split('T')[0] : null,
+                    count: record.sbcount || 0
                 }))
             }
         });

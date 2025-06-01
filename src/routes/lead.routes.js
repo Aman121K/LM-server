@@ -19,5 +19,7 @@ router.get('/date-range', leadController.getLeadsByDateRange);
 router.get('/product', leadController.getLeadsByProduct);
 router.get('/unit-type', leadController.getLeadsByUnitType);
 router.get('/budget', leadController.getLeadsByBudget);
+router.get('/allCallStatus', leadController.allCallStatus);
+router.get('/', leadController.getFilteredLeads);
 
 module.exports = router; 
