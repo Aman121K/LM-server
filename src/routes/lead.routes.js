@@ -21,5 +21,7 @@ router.get('/unit-type', leadController.getLeadsByUnitType);
 router.get('/budget', leadController.getLeadsByBudget);
 router.get('/allCallStatus', leadController.allCallStatus);
 router.get('/', leadController.getFilteredLeads);
+router.get('/allBudgetsList',leadController.allBugetsList);
+router.get('/allUnitList',leadController.allUnitslist)
 
 module.exports = router; 

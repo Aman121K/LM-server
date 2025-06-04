@@ -21,8 +21,8 @@ exports.createLead = async (req, res) => {
                 FirstName, EmailId, ContactNumber, callstatus, PostingDate, 
                 followup, remarks, productname, unittype, budget, callby, submiton
             ) VALUES (?, ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?, ?, CURDATE())`,
-            [firstName, emailId, contactNumber, callStatus, followup, remarks, 
-             productName, unitType, budget, callBy]
+            [firstName, emailId, contactNumber, callStatus, followup, remarks,
+                productName, unitType, budget, callBy]
         );
 
         res.status(201).json({
@@ -40,8 +40,8 @@ exports.createLead = async (req, res) => {
 // Get all leads for a specific call status
 exports.getLeadsByCallStatus = async (req, res) => {
     try {
-        const { callStatus, callby, startDate, endDate } = req.query;
-        console.log("Query params:", { callStatus, callby, startDate, endDate });
+        const { callStatus, callby, startDate, endDate, ContactNumber } = req.query;
+        console.log("Query params:", { callStatus, callby, startDate, endDate, ContactNumber });
 
         // Start with base query
         let query = 'SELECT * FROM tblmaster';
@@ -54,15 +54,22 @@ exports.getLeadsByCallStatus = async (req, res) => {
             params.push(callby);
         }
 
-        // if (callStatus) {
-        //     conditions.push('callstatus = ?');
-        //     params.push(callStatus);
-        // }
+        if (callStatus) {
+            conditions.push('callstatus = ?');
+            params.push(callStatus);
+        }
 
-        // if (startDate && endDate) {
-        //     conditions.push('DATE(submiton) BETWEEN ? AND ?');
-        //     params.push(startDate, endDate);
-        // }
+        // Add ContactNumber search with LIKE
+        if (ContactNumber) {
+            conditions.push('ContactNumber LIKE ?');
+            params.push(`%${ContactNumber}%`);
+        }
+
+        // Only add date condition if both startDate and endDate are provided
+        if (startDate && endDate && startDate.trim() !== '' && endDate.trim() !== '') {
+            conditions.push('DATE(createdAt) BETWEEN ? AND ?');
+            params.push(startDate, endDate);
+        }
 
         // Add WHERE clause if there are any conditions
         if (conditions.length > 0) {
@@ -148,8 +155,8 @@ exports.updateLead = async (req, res) => {
                 budget = ?,
                 submiton = CURDATE()
             WHERE id = ?`,
-            [firstName, emailId, contactNumber, callStatus, followup, remarks, 
-             productName, unitType, budget, req.params.id]
+            [firstName, emailId, contactNumber, callStatus, followup, remarks,
+                productName, unitType, budget, req.params.id]
         );
 
         if (result.affectedRows === 0) {
@@ -303,7 +310,7 @@ exports.getLeadsByBudget = async (req, res) => {
     }
 };
 
-exports.allCallStatus=async(req,res)=>{
+exports.allCallStatus = async (req, res) => {
     try {
         const [callStatus] = await db.execute(
             'SELECT * FROM callStatus ORDER BY id DESC',
@@ -379,3 +386,36 @@ exports.getFilteredLeads = async (req, res) => {
         });
     }
 };
+
+exports.allBugetsList = async (req, res) => {
+    try {
+        const [budgetList] = await db.execute(
+            'SELECT * FROM Budget get order by id DESC',
+        );
+        res.status(200).json({
+            success: true,
+            data: budgetList
+        });
+    } catch (error) {
+        res.status(400).json({
+            success: false,
+            message: error.message
+        });
+    }
+}
+exports.allUnitslist = async (req, res) => {
+    try {
+        const [allUnits] = await db.execute(
+            'SELECT * FROM unitType order by id DESC',
+        );
+        res.status(200).json({
+            success: true,
+            data: allUnits
+        });
+    } catch (error) {
+        res.status(400).json({
+            success: false,
+            message: error.message
+        });
+    }
+}
