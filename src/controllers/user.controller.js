@@ -132,7 +132,7 @@ exports.logout = async (req, res) => {
 
 // Get current user
 exports.getCurrentUser = async (req, res) => {
-    console.log("Current users ",req);
+    console.log("Current users ", req);
     try {
         const [users] = await db.execute(
             'SELECT * FROM tblusers WHERE id = ?',
@@ -164,6 +164,7 @@ exports.forgotPassword = async (req, res) => {
         const { email } = req.body;
 
         // Check if user exists
+        console.log("email>>",email)
         const [users] = await db.execute(
             'SELECT * FROM tblusers WHERE UserEmail = ?',
             [email]
@@ -193,8 +194,8 @@ exports.forgotPassword = async (req, res) => {
         const transporter = nodemailer.createTransport({
             service: 'gmail',
             auth: {
-                user: 'javascript.pgl@gmail.com',
-                pass: process.env.EMAIL_PASSWORD
+                user: 'reactjs.pgl@gmail.com',
+                pass: 'Vikas@123@'
             }
         });
 
@@ -226,7 +227,7 @@ exports.forgotPassword = async (req, res) => {
         });
     }
 };
-exports.getTlUser=async(req,res)=>{
+exports.getTlUser = async (req, res) => {
     try {
         const [users] = await db.execute(
             'SELECT id, FullName, Username, UserEmail FROM tblusers WHERE usertype = ?',
@@ -251,7 +252,7 @@ exports.getTlUser=async(req,res)=>{
         });
     }
 }
-exports.allUserList=async(req,res)=>{
+exports.allUserList = async (req, res) => {
     try {
         const [users] = await db.execute(
             'SELECT * FROM tblusers order by id desc'
@@ -265,7 +266,7 @@ exports.allUserList=async(req,res)=>{
             success: false,
             message: error.message
         });
-    }   
+    }
 }
 
 // Delete User
@@ -355,8 +356,8 @@ exports.updateUser = async (req, res) => {
 
         // Update user
         await db.execute(
-            'UPDATE tblusers SET FullName = ?, Username = ?, UserEmail = ?, usertype = ?' + 
-            (password ? ', Password = ?' : '') + 
+            'UPDATE tblusers SET FullName = ?, Username = ?, UserEmail = ?, usertype = ?' +
+            (password ? ', Password = ?' : '') +
             ' WHERE id = ?',
             [
                 updateData.FullName,

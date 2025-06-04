@@ -54,7 +54,7 @@ exports.getLeadsByCallStatus = async (req, res) => {
             params.push(callby);
         }
 
-        if (callStatus) {
+        if (callStatus!=='All') {
             conditions.push('callstatus = ?');
             params.push(callStatus);
         }
@@ -129,51 +129,128 @@ exports.getLeadByContact = async (req, res) => {
 // Update a lead
 exports.updateLead = async (req, res) => {
     try {
+        const leadId = req.params.id;
         const {
-            firstName,
-            emailId,
-            contactNumber,
-            callStatus,
-            followup,
+            FirstName,
+            LastName,
+            EmailId,
+            ContactNumber,
+            callstatus,
             remarks,
-            productName,
-            unitType,
+            followup,
+            productname,
+            unittype,
             budget
         } = req.body;
 
-        const [result] = await db.execute(
-            `UPDATE tblmaster SET 
-                FirstName = ?, 
-                EmailId = ?, 
-                ContactNumber = ?, 
-                callstatus = ?, 
-                PostingDate = CURDATE(),
-                followup = ?, 
-                remarks = ?, 
-                productname = ?, 
-                unittype = ?, 
-                budget = ?,
-                submiton = CURDATE()
-            WHERE id = ?`,
-            [firstName, emailId, contactNumber, callStatus, followup, remarks,
-                productName, unitType, budget, req.params.id]
+        console.log("all edit params>>", {
+            FirstName,
+            LastName,
+            EmailId,
+            ContactNumber,
+            callstatus,
+            remarks,
+            followup,
+            productname,
+            unittype,
+            budget
+        });
+
+        // First check if lead exists
+        const [existingLead] = await db.execute(
+            'SELECT * FROM tblmaster WHERE id = ?',
+            [leadId]
         );
 
-        if (result.affectedRows === 0) {
+        if (existingLead.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: 'Lead not found'
             });
         }
 
+        // Build update query dynamically based on provided fields
+        const updateFields = [];
+        const params = [];
+
+        if (FirstName !== undefined) {
+            updateFields.push('FirstName = ?');
+            params.push(FirstName);
+        }
+
+        if (LastName !== undefined) {
+            updateFields.push('LastName = ?');
+            params.push(LastName);
+        }
+
+        if (EmailId !== undefined) {
+            updateFields.push('EmailId = ?');
+            params.push(EmailId);
+        }
+
+        if (ContactNumber !== undefined) {
+            updateFields.push('ContactNumber = ?');
+            params.push(ContactNumber);
+        }
+
+        if (callstatus !== undefined) {
+            updateFields.push('callstatus = ?');
+            params.push(callstatus);
+        }
+
+        if (followup !== undefined) {
+            updateFields.push('followup = ?');
+            params.push(followup);
+        }
+
+        if (remarks !== undefined) {
+            updateFields.push('remarks = ?');
+            params.push(remarks);
+        }
+
+        if (productname !== undefined) {
+            updateFields.push('productname = ?');
+            params.push(productname);
+        }
+
+        if (unittype !== undefined) {
+            updateFields.push('unittype = ?');
+            params.push(unittype);
+        }
+
+        if (budget !== undefined) {
+            updateFields.push('budget = ?');
+            params.push(budget);
+        }
+
+        // Always update the submiton timestamp
+        updateFields.push('submiton = CURDATE()');
+
+        // Add the lead ID to params
+        params.push(leadId);
+
+        // Execute update query
+        const [result] = await db.execute(
+            `UPDATE tblmaster SET ${updateFields.join(', ')} WHERE id = ?`,
+            params
+        );
+
+        // Get updated lead
+        const [updatedLead] = await db.execute(
+            'SELECT * FROM tblmaster WHERE id = ?',
+            [leadId]
+        );
+
         res.status(200).json({
             success: true,
-            data: { id: req.params.id, ...req.body }
+            message: 'Lead updated successfully',
+            data: updatedLead[0]
         });
     } catch (error) {
-        res.status(400).json({
+        console.error('Update lead error:', error);
+        res.status(500).json({
             success: false,
-            message: error.message
+            message: 'Error updating lead'
         });
     }
 };
