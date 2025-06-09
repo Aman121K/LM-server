@@ -2,6 +2,28 @@ const express = require('express');
 const router = express.Router();
 const leadController = require('../controllers/lead.controller');
 const auth = require('../middleware/auth');
+const multer = require('multer');
+const path = require('path');
+
+// Configure multer for file upload
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, 'uploads/');
+    },
+    filename: function (req, file, cb) {
+        cb(null, 'importfile-' + Date.now() + path.extname(file.originalname));
+    }
+});
+
+const upload = multer({
+    storage: storage,
+    fileFilter: function (req, file, cb) {
+        if (file.mimetype !== 'text/csv') {
+            return cb(new Error('Only CSV files are allowed'));
+        }
+        cb(null, true);
+    }
+});
 
 // Apply auth middleware to all routes
 router.use(auth);
@@ -23,5 +45,17 @@ router.get('/allCallStatus', leadController.allCallStatus);
 router.get('/', leadController.getFilteredLeads);
 router.get('/allBudgetsList', leadController.allBugetsList);
 router.get('/allUnitslist', leadController.allUnitslist);
+
+// Combined dashboard data endpoint
+router.post('/user-reports', leadController.getUserDashboardData);
+
+// Import leads from Excel
+router.post('/import', upload.single('importfile'), leadController.importLeads);
+
+// Download sample CSV
+router.get('/sample-csv', leadController.downloadSampleCSV);
+
+// Search leads
+router.post('/search', leadController.searchLeads);
 
 module.exports = router; 

@@ -191,13 +191,21 @@ exports.forgotPassword = async (req, res) => {
         );
 
         // Create email transporter
+
         const transporter = nodemailer.createTransport({
-            service: 'gmail',
+            service: 'Gmail', // For example, 'Gmail'
             auth: {
-                user: 'reactjs.pgl@gmail.com',
-                pass: 'Vikas@123@'
+                user: 'javascript.pgl@gmail.com',
+                pass: 'msdf qhmj fhbv xlbm'
             }
         });
+        // const transporter = nodemailer.createTransport({
+        //     service: 'gmail',
+        //     auth: {
+        //         user: 'reactjs.pgl@gmail.com',
+        //         pass: 'Vikas@123@'
+        //     }
+        // });
 
         // Email content
         const mailOptions = {
