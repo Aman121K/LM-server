@@ -37,7 +37,7 @@ router.delete('/:id', leadController.deleteLead);
 
 // Additional lead queries
 router.get('/call-statuses', leadController.getCallStatuses);
-router.get('/date-range', leadController.getLeadsByDateRange);
+router.post('/date-range', leadController.getLeadsByDateRange);
 router.get('/product', leadController.getLeadsByProduct);
 router.get('/unit-type', leadController.getLeadsByUnitType);
 router.get('/budget', leadController.getLeadsByBudget);

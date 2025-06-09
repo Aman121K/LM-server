@@ -184,6 +184,19 @@ exports.updateLead = async (req, res) => {
             });
         }
 
+        // Get TL name from tbluser based on callby
+        const [userData] = await db.execute(
+            'SELECT tl_name FROM tblusers WHERE username = ?',
+            [existingLead[0].callby]
+        );
+
+        if (userData.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
         // Build update query dynamically based on provided fields
         const updateFields = [];
         const params = [];
@@ -238,8 +251,10 @@ exports.updateLead = async (req, res) => {
             params.push(budget);
         }
 
-        // Always update the submiton timestamp
+        // Always update the submiton timestamp and assign_tl
         updateFields.push('submiton = CURDATE()');
+        updateFields.push('assign_tl = ?');
+        params.push(userData[0].tl_name);
 
         // Add the lead ID to params
         params.push(leadId);
@@ -321,15 +336,38 @@ exports.getCallStatuses = async (req, res) => {
 // Get all leads for a specific date range
 exports.getLeadsByDateRange = async (req, res) => {
     try {
-        const { startDate, endDate, callBy } = req.query;
+        const { date, callBy } = req.body;
+        
+        // Get leads for the date
         const [leads] = await db.execute(
-            'SELECT * FROM tblmaster WHERE followup BETWEEN ? AND ? AND callby = ? ORDER BY id DESC',
-            [startDate, endDate, callBy]
+            'SELECT * FROM tblmaster WHERE PostingDate BETWEEN ? AND ? AND callby = ? ORDER BY id DESC',
+            [date, date, callBy]
         );
+
+        // Get call status counts
+        const [callStatusCounts] = await db.execute(
+            `SELECT callstatus, COUNT(*) as count 
+             FROM tblmaster 
+             WHERE PostingDate BETWEEN ? AND ? 
+             AND callby = ? 
+             AND callstatus != ""
+             GROUP BY callstatus`,
+            [date, date, callBy]
+        );
+
+        // Format the counts into a more readable object
+        const statusCounts = callStatusCounts.reduce((acc, curr) => {
+            acc[curr.callstatus] = curr.count;
+            return acc;
+        }, {});
 
         res.status(200).json({
             success: true,
-            data: leads
+            data: {
+                leads,
+                statusCounts,
+                totalLeads: leads.length
+            }
         });
     } catch (error) {
         res.status(400).json({
@@ -793,15 +831,15 @@ Mary,White,mary.w@gmail.com,9876543211,New Buyer,Looking for Farmhouse,2024-03-1
 // Search leads by phone number and name
 exports.searchLeads = async (req, res) => {
     try {
-        const { phoneNumber, name } = req.body;
+        const { contactNumber, name } = req.body;
 
         // Build the query conditions
         let conditions = [];
         let params = [];
 
-        if (phoneNumber) {
+        if (contactNumber) {
             conditions.push('ContactNumber LIKE ?');
-            params.push(`%${phoneNumber}%`);
+            params.push(`%${contactNumber}%`);
         }
 
         if (name) {
