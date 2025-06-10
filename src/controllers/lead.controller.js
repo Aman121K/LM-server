@@ -340,7 +340,7 @@ exports.getLeadsByDateRange = async (req, res) => {
         
         // Get leads for the date
         const [leads] = await db.execute(
-            'SELECT * FROM tblmaster WHERE PostingDate BETWEEN ? AND ? AND callby = ? ORDER BY id DESC',
+            'SELECT * FROM tblmaster WHERE submiton BETWEEN ? AND ? AND callby = ? ORDER BY id DESC',
             [date, date, callBy]
         );
 
@@ -348,7 +348,7 @@ exports.getLeadsByDateRange = async (req, res) => {
         const [callStatusCounts] = await db.execute(
             `SELECT callstatus, COUNT(*) as count 
              FROM tblmaster 
-             WHERE PostingDate BETWEEN ? AND ? 
+             WHERE submiton BETWEEN ? AND ? 
              AND callby = ? 
              AND callstatus != ""
              GROUP BY callstatus`,
