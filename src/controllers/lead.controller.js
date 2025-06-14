@@ -315,15 +315,29 @@ exports.deleteLead = async (req, res) => {
 // Get distinct call statuses for a user
 exports.getCallStatuses = async (req, res) => {
     try {
-        const { callBy } = req.query;
+        // Get callBy from either query parameter or URL path
+        const callBy = req.query.callBy || req.params.callBy;
+        
+        if (!callBy) {
+            return res.status(400).json({
+                success: false,
+                message: 'CallBy parameter is required'
+            });
+        }
+
         const [statuses] = await db.execute(
             'SELECT DISTINCT callstatus FROM tblmaster WHERE callby = ? AND callstatus != ""',
             [callBy]
         );
 
+        // Transform the data to match the client-side format
+        const formattedStatuses = statuses.map(status => ({
+            name: status.callstatus
+        }));
+
         res.status(200).json({
             success: true,
-            data: statuses.map(status => status.callstatus)
+            data: formattedStatuses
         });
     } catch (error) {
         res.status(400).json({
