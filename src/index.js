@@ -5,8 +5,17 @@ const db = require('./config/db');
 
 const app = express();
 
+// CORS configuration
+const corsOptions = {
+    origin: ['http://localhost:3000', 'http://127.0.0.1:3000', 'https://your-production-domain.com'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    credentials: true,
+    optionsSuccessStatus: 200
+};
+
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

@@ -58,4 +58,6 @@ router.get('/sample-csv', leadController.downloadSampleCSV);
 // Search leads
 router.post('/search', leadController.searchLeads);
 
+router.get('/resale-seller', leadController.showAllResalesLeas);
+
 module.exports = router; 

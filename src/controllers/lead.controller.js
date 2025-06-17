@@ -155,7 +155,8 @@ exports.updateLead = async (req, res) => {
             followup,
             productname,
             unittype,
-            budget
+            budget,
+            assignedTo
         } = req.body;
 
         console.log("all edit params>>", {
@@ -251,6 +252,11 @@ exports.updateLead = async (req, res) => {
             params.push(budget);
         }
 
+        if (assignedTo) {
+            updateFields.push('callby = ?');
+            params.push(assignedTo);
+        }
+
         // Always update the submiton timestamp and assign_tl
         updateFields.push('submiton = CURDATE()');
         updateFields.push('assign_tl = ?');
@@ -317,7 +323,7 @@ exports.getCallStatuses = async (req, res) => {
     try {
         // Get callBy from either query parameter or URL path
         const callBy = req.query.callBy || req.params.callBy;
-        
+
         if (!callBy) {
             return res.status(400).json({
                 success: false,
@@ -351,7 +357,7 @@ exports.getCallStatuses = async (req, res) => {
 exports.getLeadsByDateRange = async (req, res) => {
     try {
         const { date, callBy } = req.body;
-        
+
         // Get leads for the date
         const [leads] = await db.execute(
             'SELECT * FROM tblmaster WHERE submiton BETWEEN ? AND ? AND callby = ? ORDER BY id DESC',
@@ -905,6 +911,26 @@ exports.searchLeads = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Error searching leads'
+        });
+    }
+};
+
+exports.showAllResalesLeas = async (req, res) => {
+    try {
+        const [leads] = await db.execute(
+            'SELECT * FROM tblmaster WHERE callstatus = ? ORDER BY id DESC',
+            ['Resale - Seller']
+        );
+
+        res.status(200).json({
+            success: true,
+            data: leads
+        });
+    } catch (error) {
+        console.error('Get resale seller leads error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching resale seller leads'
         });
     }
 };
