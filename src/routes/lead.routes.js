@@ -4,11 +4,16 @@ const leadController = require('../controllers/lead.controller');
 const auth = require('../middleware/auth');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 
 // Configure multer for file upload
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
-        cb(null, 'uploads/');
+        const dir = 'uploads/';
+        if (!fs.existsSync(dir)){
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        cb(null, dir);
     },
     filename: function (req, file, cb) {
         cb(null, 'importfile-' + Date.now() + path.extname(file.originalname));
@@ -18,6 +23,7 @@ const storage = multer.diskStorage({
 const upload = multer({
     storage: storage,
     fileFilter: function (req, file, cb) {
+        console.log("files come here>>")
         if (file.mimetype !== 'text/csv') {
             return cb(new Error('Only CSV files are allowed'));
         }

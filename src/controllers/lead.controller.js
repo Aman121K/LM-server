@@ -745,9 +745,12 @@ exports.importLeads = async (req, res) => {
         }
 
         const filePath = req.file.path;
+
+        console.log("files path>>",filePath)
         const fs = require('fs');
         const csv = require('csv-parser');
         const results = [];
+        console.log("files path csv-parser>>",csv)
 
         // Read CSV file
         await new Promise((resolve, reject) => {
