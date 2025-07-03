@@ -772,15 +772,17 @@ exports.importLeads = async (req, res) => {
                 remarks,
                 PostingDate,
                 callby,
-                submiton
+                submiton,
+                productName,
+               
             } = row;
 
             // Insert record
             const [result] = await db.execute(
                 `INSERT INTO tblmaster (
                     FirstName, LastName, EmailId, ContactNumber, 
-                    callstatus, remarks, PostingDate, callby, submiton
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    callstatus, remarks, PostingDate, callby, submiton,productname
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,?)`,
                 [
                     FirstName,
                     LastName,
@@ -790,7 +792,8 @@ exports.importLeads = async (req, res) => {
                     remarks,
                     PostingDate,
                     callby,
-                    submiton
+                    submiton,
+                    productName
                 ]
             );
 
