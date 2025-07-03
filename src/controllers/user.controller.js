@@ -6,7 +6,7 @@ const nodemailer = require('nodemailer');
 // Register a new user
 exports.register = async (req, res) => {
     try {
-        const { fullName, username, email, password } = req.body;
+        const { fullName, username, email, password,tlUsername,userRole} = req.body;
 
         // Check if user already exists
         const [existingUsers] = await db.execute(
@@ -27,8 +27,8 @@ exports.register = async (req, res) => {
 
         // Insert new user
         const [result] = await db.execute(
-            'INSERT INTO tblusers (FullName, Username, UserEmail, Password) VALUES (?, ?, ?, ?)',
-            [fullName, username, email, hashedPassword]
+            'INSERT INTO tblusers (FullName, Username, UserEmail, Password,tl_name,userType) VALUES (?, ?, ?, ?,?,?)',
+            [fullName, username, email, hashedPassword,tlUsername,userRole]
         );
 
         res.status(201).json({
@@ -164,7 +164,7 @@ exports.forgotPassword = async (req, res) => {
         const { email } = req.body;
 
         // Check if user exists
-        console.log("email>>",email)
+        console.log("email>>", email)
         const [users] = await db.execute(
             'SELECT * FROM tblusers WHERE UserEmail = ?',
             [email]
@@ -235,7 +235,7 @@ exports.forgotPassword = async (req, res) => {
         });
     }
 };
-exports.getTlUser = async (req, res) => {
+exports.getTls = async (req, res) => {
     try {
         const [users] = await db.execute(
             'SELECT id, FullName, Username, UserEmail FROM tblusers WHERE usertype = ?',
@@ -465,5 +465,54 @@ exports.getUserReports = async (req, res) => {
             success: false,
             message: 'Error fetching user reports'
         });
+    }
+};
+
+exports.getUsersByTl = async (req, res) => {
+    try {
+        const { tlId } = req.params;
+        const [users] = await db.execute('SELECT * FROM tblusers WHERE tl_name = ?', [tlId]);
+        res.status(200).json({
+            success: true,
+            data: users
+        });
+    } catch (error) {
+        console.error('Get users by TL error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching users by TL'
+        });
+    }
+}
+// Get all users under a TL and their call statuses
+exports.getUsersCallStatusesByTlName = async (req, res) => {
+    try {
+        const { tlName } = req.params;
+        if (!tlName) {
+            return res.status(400).json({ success: false, message: 'tlName parameter is required' });
+        }
+
+        // 1. Get all users under this TL
+        const [users] = await db.execute('SELECT id, Username, FullName, UserEmail FROM tblusers WHERE tl_name = ?', [tlName]);
+        if (users.length === 0) {
+            return res.status(404).json({ success: false, message: 'No users found for this TL' });
+        }
+
+        // 2. For each user, get all their call statuses from tblmaster
+        const results = await Promise.all(users.map(async (user) => {
+            const [statuses] = await db.execute(
+                'SELECT callstatus FROM tblmaster WHERE callby = ? AND callstatus != ""',
+                [user.Username]
+            );
+            return {
+                user,
+                callStatuses: statuses.map(s => s.callstatus)
+            };
+        }));
+
+        res.status(200).json({ success: true, data: results });
+    } catch (error) {
+        console.error('Error in getUsersCallStatusesByTlName:', error);
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
