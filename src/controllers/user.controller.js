@@ -238,8 +238,7 @@ exports.forgotPassword = async (req, res) => {
 exports.getTls = async (req, res) => {
     try {
         const [users] = await db.execute(
-            'SELECT id, FullName, Username, UserEmail FROM tblusers WHERE usertype = ?',
-            ['TL']
+            'SELECT id, FullName, Username, UserEmail FROM tblusers'
         );
 
         if (users.length === 0) {
