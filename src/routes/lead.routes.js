@@ -42,7 +42,9 @@ router.put('/:id', leadController.updateLead);
 router.delete('/:id', leadController.deleteLead);
 
 // Additional lead queries
+
 router.get('/call-statuses/:callBy?', leadController.getCallStatuses);
+router.get('/products-name/:callBy?', leadController.getProductsNameByUser);
 router.post('/date-range', leadController.getLeadsByDateRange);
 router.get('/product', leadController.getLeadsByProduct);
 router.get('/unit-type', leadController.getLeadsByUnitType);

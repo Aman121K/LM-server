@@ -53,7 +53,7 @@ exports.createLead = async (req, res) => {
 // Get all leads for a specific call status
 exports.getLeadsByCallStatus = async (req, res) => {
     try {
-        const { callStatus, callby, startDate, endDate, ContactNumber } = req.query;
+        const { callStatus, callby, startDate, endDate, ContactNumber, productname } = req.query;
         console.log("Query params:", { callStatus, callby, startDate, endDate, ContactNumber });
 
         // Start with base query
@@ -74,6 +74,13 @@ exports.getLeadsByCallStatus = async (req, res) => {
             conditions.push('callstatus = ""');
         }
 
+        if (productname !== 'All') {
+            conditions.push('productname = ?');
+            params.push(productname);
+        }
+        else {
+            conditions.push('productname = ""');
+        }
         // Add ContactNumber search with LIKE
         if (ContactNumber) {
             conditions.push('ContactNumber LIKE ?');
@@ -352,6 +359,39 @@ exports.getCallStatuses = async (req, res) => {
         });
     }
 };
+exports.getProductsNameByUser = async (req, res) => {
+    try {
+        // Get callBy from either query parameter or URL path
+        const callBy = req.query.callBy || req.params.callBy;
+
+        if (!callBy) {
+            return res.status(400).json({
+                success: false,
+                message: 'CallBy parameter is required'
+            });
+        }
+
+        const [productname] = await db.execute(
+            'SELECT DISTINCT productname FROM tblmaster WHERE callby = ?',
+            [callBy]
+        );
+
+        // Transform the data to match the client-side format
+        const formattedProductName = productname.map(status => ({
+            name: status.productname
+        }));
+
+        res.status(200).json({
+            success: true,
+            data: formattedProductName
+        });
+    } catch (error) {
+        res.status(400).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
 
 // Get all leads for a specific date range
 exports.getLeadsByDateRange = async (req, res) => {
@@ -480,7 +520,7 @@ exports.allCallStatus = async (req, res) => {
 // Get Filtered Leads
 exports.getFilteredLeads = async (req, res) => {
     try {
-        const { startDate, endDate, callStatus, callby } = req.query;
+        const { startDate, endDate, callStatus, callby, productname } = req.query;
 
         // Build the query conditions
         let conditions = [];
@@ -501,6 +541,11 @@ exports.getFilteredLeads = async (req, res) => {
             params.push(callby);
         }
 
+        if (productname) {
+            conditions.push('productname = ?');
+            params.push(productname);
+        }
+
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
         // Get filtered leads
@@ -514,6 +559,8 @@ exports.getFilteredLeads = async (req, res) => {
             `SELECT COUNT(*) as total FROM tblmaster ${whereClause}`,
             params
         );
+
+        console.log("totalCount>>", totalCount)
 
         res.status(200).json({
             success: true,
@@ -746,11 +793,11 @@ exports.importLeads = async (req, res) => {
 
         const filePath = req.file.path;
 
-        console.log("files path>>",filePath)
+        console.log("files path>>", filePath)
         const fs = require('fs');
         const csv = require('csv-parser');
         const results = [];
-        console.log("files path csv-parser>>",csv)
+        console.log("files path csv-parser>>", csv)
 
         // Read CSV file
         await new Promise((resolve, reject) => {
@@ -774,7 +821,7 @@ exports.importLeads = async (req, res) => {
                 callby,
                 submiton,
                 productName,
-               
+
             } = row;
 
             // Insert record
