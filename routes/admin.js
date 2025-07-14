@@ -6,6 +6,10 @@ const ExcelJS = require('exceljs');
 const multer = require('multer');
 const upload = multer({ dest: 'uploads/' });
 
+const mongoose = require('mongoose');
+const User = require('../src/models/user.model');
+const Lead = require('../src/models/lead.model');
+
 // Get users with filters
 router.post('/users', auth, async (req, res) => {
   try {
@@ -201,6 +205,75 @@ router.post('/upload', auth, upload.single('file'), async (req, res) => {
       success: false,
       message: 'Error importing users'
     });
+  }
+});
+
+// Admin-only: Get TLs and their users with lead stats
+router.get('/tls-users-report', async (req, res) => {
+  try {
+
+    const tls = await User.find({ userType: 'tl' });
+    console.log("tls>>",tls)
+    const report = [];
+
+    for (const tl of tls) {
+      // Find users under this TL
+      const users = await User.find({ tlName: tl.username });
+      const userStats = [];
+      for (const user of users) {
+        // Count leads for this user
+        const totalData = await Lead.countDocuments({ callBy: user.username });
+        const totalCallsDone = await Lead.countDocuments({ callBy: user.username, callStatus: 'done' });
+        const totalCallsPending = await Lead.countDocuments({ callBy: user.username, callStatus: { $ne: 'done' } });
+        userStats.push({
+          userName: user.fullName,
+          totalData,
+          totalCallsDone,
+          totalCallsPending
+        });
+      }
+      report.push({
+        tlName: tl.fullName,
+        users: userStats
+      });
+    }
+
+    res.json({ success: true, data: report });
+  } catch (error) {
+    console.error('TLS report error:', error);
+    res.status(500).json({ success: false, message: 'Error generating report' });
+  }
+});
+
+router.get('/tls-users-report',async (req, res) => {
+  try {
+    const [tls] = await db.execute("SELECT id, FullName, Username FROM tblusers WHERE userType = 'tl'");
+    const report = [];
+
+    for (const tl of tls) {
+      const [users] = await db.execute("SELECT id, FullName, Username FROM tblusers WHERE tl_name = ?", [tl.Username]);
+      const userStats = [];
+      for (const user of users) {
+        const [[{ totalData }]] = await db.execute("SELECT COUNT(*) as totalData FROM tblmaster WHERE callby = ?", [user.Username]);
+        const [[{ totalCallsDone }]] = await db.execute("SELECT COUNT(*) as totalCallsDone FROM tblmaster WHERE callby = ? AND callstatus = 'done'", [user.Username]);
+        const [[{ totalCallsPending }]] = await db.execute("SELECT COUNT(*) as totalCallsPending FROM tblmaster WHERE callby = ? AND callstatus != 'done'", [user.Username]);
+        userStats.push({
+          userName: user.FullName,
+          totalData,
+          totalCallsDone,
+          totalCallsPending
+        });
+      }
+      report.push({
+        tlName: tl.FullName,
+        users: userStats
+      });
+    }
+
+    res.json({ success: true, data: report });
+  } catch (error) {
+    console.error('TLS report (MySQL) error:', error);
+    res.status(500).json({ success: false, message: 'Error generating report' });
   }
 });
 

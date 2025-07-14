@@ -6,7 +6,7 @@ const pool = mysql.createPool({
     password: 'Sharadb@!123',
     database: 'ssuqgpoy_dashboard_1',
     waitForConnections: true,
-    connectionLimit: 10,
+    connectionLimit: 11,
     queueLimit: 0
 });
 

@@ -5,7 +5,6 @@ const auth = require('../middleware/auth');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-
 // Configure multer for file upload
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
@@ -40,9 +39,7 @@ router.get('/', leadController.getLeadsByCallStatus);
 router.get('/contact', leadController.getLeadByContact);
 router.put('/:id', leadController.updateLead);
 router.delete('/:id', leadController.deleteLead);
-
 // Additional lead queries
-
 router.get('/call-statuses/:callBy?', leadController.getCallStatuses);
 router.get('/products-name/:callBy?', leadController.getProductsNameByUser);
 router.post('/date-range', leadController.getLeadsByDateRange);
@@ -53,7 +50,6 @@ router.get('/allCallStatus', leadController.allCallStatus);
 router.get('/', leadController.getFilteredLeads);
 router.get('/allBudgetsList', leadController.allBugetsList);
 router.get('/allUnitslist', leadController.allUnitslist);
-
 // Combined dashboard data endpoint
 router.post('/user-reports', leadController.getUserDashboardData);
 

@@ -26,8 +26,13 @@ const userSchema = new mongoose.Schema({
     },
     userType: {
         type: String,
-        enum: ['admin', 'user'],
+        enum: ['admin', 'user', 'tl'], // Added 'tl'
         default: 'user'
+    },
+    tlName: {
+        type: String,
+        trim: true,
+        default: '' // New field to store TL's username or name
     },
     loginStatus: {
         type: Boolean,
