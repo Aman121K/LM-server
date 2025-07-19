@@ -53,8 +53,8 @@ exports.createLead = async (req, res) => {
 // Get all leads for a specific call status
 exports.getLeadsByCallStatus = async (req, res) => {
     try {
-        const { callStatus, callby, startDate, endDate, ContactNumber, productname } = req.query;
-        console.log("Query params:", { callStatus, callby, startDate, endDate, ContactNumber });
+        const { callStatus, callby, startDate, endDate, ContactNumber, productName } = req.query;
+        console.log("Query params:", { callStatus, callby, startDate, endDate, ContactNumber, productName });
 
         // Start with base query
         let query = 'SELECT * FROM tblmaster';
@@ -74,12 +74,16 @@ exports.getLeadsByCallStatus = async (req, res) => {
             conditions.push('callstatus = ""');
         }
 
-        if (productname !== 'All') {
-            conditions.push('productname = ?');
-            params.push(productname);
-        }
-        else {
-            conditions.push('productname = ""');
+
+        if (productName) {
+
+            if (productName !== 'All') {
+                conditions.push('productname = ?');
+                params.push(productName);
+            }
+            else {
+                // conditions.push('productname = ""');
+            }
         }
         // Add ContactNumber search with LIKE
         if (ContactNumber) {
