@@ -51,63 +51,146 @@ exports.createLead = async (req, res) => {
 };
 
 // Get all leads for a specific call status
+// exports.getLeadsByCallStatus = async (req, res) => {
+//     try {
+//         const { callStatus, callby, startDate, endDate, ContactNumber, productName } = req.query;
+//         console.log("Query params:", { callStatus, callby, startDate, endDate, ContactNumber, productName });
+
+//         // Start with base query
+//         let query = 'SELECT * FROM tblmaster';
+//         const params = [];
+//         const conditions = [];
+
+//         // Add conditions based on parameters
+//         if (callby) {
+//             conditions.push('callby = ?');
+//             params.push(callby);
+//         }
+
+//         if (callStatus !== 'All') {
+//             conditions.push('callstatus = ?');
+//             params.push(callStatus);
+//         } else {
+//             conditions.push('callstatus = ""');
+//         }
+
+
+//         if (productName) {
+
+//             if (productName !== 'All') {
+//                 conditions.push('productname = ?');
+//                 params.push(productName);
+//             }
+//             else {
+//                 // conditions.push('productname = ""');
+//             }
+//         }
+//         // Add ContactNumber search with LIKE
+//         if (ContactNumber) {
+//             conditions.push('ContactNumber LIKE ?');
+//             params.push(`%${ContactNumber}%`);
+//         }
+
+//         // Only add date condition if both startDate and endDate are provided
+//         if (startDate && endDate && startDate.trim() !== '' && endDate.trim() !== '') {
+//             conditions.push('DATE(createdAt) BETWEEN ? AND ?');
+//             params.push(startDate, endDate);
+//         }
+
+//         // Add WHERE clause if there are any conditions
+//         if (conditions.length > 0) {
+//             query += ' WHERE ' + conditions.join(' AND ');
+//         }
+
+//         // Add order by
+//         query += ' ORDER BY id DESC';
+
+//         console.log("Final query:", query);
+//         console.log("Query params:", params);
+
+//         const [leads] = await db.execute(query, params);
+//         console.log("Query results:", leads.length, "leads found");
+
+//         res.status(200).json({
+//             success: true,
+//             data: leads
+//         });
+//     } catch (error) {
+//         console.error("Error in getLeadsByCallStatus:", error);
+//         res.status(400).json({
+//             success: false,
+//             message: error.message
+//         });
+//     }
+// };
+
 exports.getLeadsByCallStatus = async (req, res) => {
     try {
         const { callStatus, callby, startDate, endDate, ContactNumber, productName } = req.query;
         console.log("Query params:", { callStatus, callby, startDate, endDate, ContactNumber, productName });
 
-        // Start with base query
-        let query = 'SELECT * FROM tblmaster';
+        // Start with base query, join with task_assign_history subquery
+        let query = `
+            SELECT 
+                tm.*, 
+                IFNULL(th.callDoneAt, '') AS lastCallDoneAt, 
+                IFNULL(th.callDoneBy, '') AS lastCallDoneBy
+            FROM tblmaster tm
+            LEFT JOIN (
+                SELECT t1.leadId, t1.callDoneAt, t1.callDoneBy
+                FROM ssuqgpoy_dashboard_1.task_assign_history t1
+                INNER JOIN (
+                    SELECT leadId, MAX(callDoneAt) AS maxCallDate
+                    FROM ssuqgpoy_dashboard_1.task_assign_history
+                    WHERE callDoneAt IS NOT NULL
+                    GROUP BY leadId
+                ) t2 ON t1.leadId = t2.leadId AND t1.callDoneAt = t2.maxCallDate
+            ) th ON tm.id = th.leadId
+        `;
+
         const params = [];
         const conditions = [];
 
-        // Add conditions based on parameters
+        // Add conditions based on filters
         if (callby) {
-            conditions.push('callby = ?');
+            conditions.push('tm.callby = ?');
             params.push(callby);
         }
 
         if (callStatus !== 'All') {
-            conditions.push('callstatus = ?');
+            conditions.push('tm.callstatus = ?');
             params.push(callStatus);
         } else {
-            conditions.push('callstatus = ""');
+            conditions.push('tm.callstatus = ""');
         }
 
-
-        if (productName) {
-
-            if (productName !== 'All') {
-                conditions.push('productname = ?');
-                params.push(productName);
-            }
-            else {
-                // conditions.push('productname = ""');
-            }
+        if (productName && productName !== 'All') {
+            conditions.push('tm.productname = ?');
+            params.push(productName);
         }
-        // Add ContactNumber search with LIKE
+
         if (ContactNumber) {
-            conditions.push('ContactNumber LIKE ?');
+            conditions.push('tm.ContactNumber LIKE ?');
             params.push(`%${ContactNumber}%`);
         }
 
-        // Only add date condition if both startDate and endDate are provided
         if (startDate && endDate && startDate.trim() !== '' && endDate.trim() !== '') {
-            conditions.push('DATE(createdAt) BETWEEN ? AND ?');
+            conditions.push('DATE(tm.createdAt) BETWEEN ? AND ?');
             params.push(startDate, endDate);
         }
 
-        // Add WHERE clause if there are any conditions
+        // Add WHERE clause
         if (conditions.length > 0) {
             query += ' WHERE ' + conditions.join(' AND ');
         }
 
-        // Add order by
-        query += ' ORDER BY id DESC';
+        // Order by latest
+        query += ' ORDER BY tm.id DESC';
 
         console.log("Final query:", query);
         console.log("Query params:", params);
 
+        // Execute query
         const [leads] = await db.execute(query, params);
         console.log("Query results:", leads.length, "leads found");
 
@@ -153,6 +236,162 @@ exports.getLeadByContact = async (req, res) => {
 };
 
 // Update a lead
+// exports.updateLead = async (req, res) => {
+//     try {
+//         const leadId = req.params.id;
+//         const {
+//             FirstName,
+//             LastName,
+//             EmailId,
+//             ContactNumber,
+//             callstatus,
+//             remarks,
+//             followup,
+//             productname,
+//             unittype,
+//             budget,
+//             assignedTo
+//         } = req.body;
+
+//         // console.log("all edit params>>", {
+//         //     FirstName,
+//         //     LastName,
+//         //     EmailId,
+//         //     ContactNumber,
+//         //     callstatus,
+//         //     remarks,
+//         //     followup,
+//         //     productname,
+//         //     unittype,
+//         //     budget
+//         // });
+
+//         // First check if lead exists
+//         const [existingLead] = await db.execute(
+//             'SELECT * FROM tblmaster WHERE id = ?',
+//             [leadId]
+//         );
+
+//         if (existingLead.length === 0) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: 'Lead not found'
+//             });
+//         }
+
+//         // Get TL name from tbluser based on callby
+//         const [userData] = await db.execute(
+//             'SELECT tl_name FROM tblusers WHERE username = ?',
+//             [existingLead[0].callby]
+//         );
+
+//         if (userData.length === 0) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: 'User not found'
+//             });
+//         }
+
+//         // Build update query dynamically based on provided fields
+//         const updateFields = [];
+//         const params = [];
+
+//         if (FirstName !== undefined) {
+//             updateFields.push('FirstName = ?');
+//             params.push(FirstName);
+//         }
+
+//         if (LastName !== undefined) {
+//             updateFields.push('LastName = ?');
+//             params.push(LastName);
+//         }
+
+//         if (EmailId !== undefined) {
+//             updateFields.push('EmailId = ?');
+//             params.push(EmailId);
+//         }
+
+//         if (ContactNumber !== undefined) {
+//             updateFields.push('ContactNumber = ?');
+//             params.push(ContactNumber);
+//         }
+
+//         if (callstatus !== undefined) {
+//             updateFields.push('callstatus = ?');
+//             params.push(callstatus);
+//         }
+
+//         if (followup !== undefined) {
+//             updateFields.push('followup = ?');
+//             params.push(followup);
+//         }
+
+//         if (remarks !== undefined) {
+//             updateFields.push('remarks = ?');
+//             params.push(remarks);
+//         }
+
+//         if (productname !== undefined) {
+//             updateFields.push('productname = ?');
+//             params.push(productname);
+//         }
+
+//         if (unittype !== undefined) {
+//             updateFields.push('unittype = ?');
+//             params.push(unittype);
+//         }
+
+//         if (budget !== undefined) {
+//             updateFields.push('budget = ?');
+//             params.push(budget);
+//         }
+
+//         if (assignedTo) {
+//             updateFields.push('callby = ?');
+//             params.push(assignedTo);
+//         }
+
+//         // Always update the submiton timestamp and assign_tl
+//         updateFields.push('submiton = CURDATE()');
+//         updateFields.push('assign_tl = ?');
+//         params.push(userData[0].tl_name);
+
+//         // Add the lead ID to params
+//         params.push(leadId);
+
+//         // Execute update query
+//         const [result] = await db.execute(
+//             `UPDATE tblmaster SET ${updateFields.join(', ')} WHERE id = ?`,
+//             params
+//         );
+
+
+
+
+
+
+
+
+
+//         // Get updated lead
+//         const [updatedLead] = await db.execute(
+//             'SELECT * FROM tblmaster WHERE id = ?',
+//             [leadId]
+//         );
+
+//         res.status(200).json({
+//             success: true,
+//             message: 'Lead updated successfully',
+//             data: updatedLead[0]
+//         });
+//     } catch (error) {
+//         console.error('Update lead error:', error);
+//         res.status(500).json({
+//             success: false,
+//             message: 'Error updating lead'
+//         });
+//     }
+// };
 exports.updateLead = async (req, res) => {
     try {
         const leadId = req.params.id;
@@ -170,20 +409,7 @@ exports.updateLead = async (req, res) => {
             assignedTo
         } = req.body;
 
-        console.log("all edit params>>", {
-            FirstName,
-            LastName,
-            EmailId,
-            ContactNumber,
-            callstatus,
-            remarks,
-            followup,
-            productname,
-            unittype,
-            budget
-        });
-
-        // First check if lead exists
+        // Check if lead exists
         const [existingLead] = await db.execute(
             'SELECT * FROM tblmaster WHERE id = ?',
             [leadId]
@@ -196,7 +422,7 @@ exports.updateLead = async (req, res) => {
             });
         }
 
-        // Get TL name from tbluser based on callby
+        // Get TL name from tblusers
         const [userData] = await db.execute(
             'SELECT tl_name FROM tblusers WHERE username = ?',
             [existingLead[0].callby]
@@ -209,7 +435,7 @@ exports.updateLead = async (req, res) => {
             });
         }
 
-        // Build update query dynamically based on provided fields
+        // Build update query
         const updateFields = [];
         const params = [];
 
@@ -217,69 +443,72 @@ exports.updateLead = async (req, res) => {
             updateFields.push('FirstName = ?');
             params.push(FirstName);
         }
-
         if (LastName !== undefined) {
             updateFields.push('LastName = ?');
             params.push(LastName);
         }
-
         if (EmailId !== undefined) {
             updateFields.push('EmailId = ?');
             params.push(EmailId);
         }
-
         if (ContactNumber !== undefined) {
             updateFields.push('ContactNumber = ?');
             params.push(ContactNumber);
         }
-
         if (callstatus !== undefined) {
             updateFields.push('callstatus = ?');
             params.push(callstatus);
         }
-
         if (followup !== undefined) {
             updateFields.push('followup = ?');
             params.push(followup);
         }
-
         if (remarks !== undefined) {
             updateFields.push('remarks = ?');
             params.push(remarks);
         }
-
         if (productname !== undefined) {
             updateFields.push('productname = ?');
             params.push(productname);
         }
-
         if (unittype !== undefined) {
             updateFields.push('unittype = ?');
             params.push(unittype);
         }
-
         if (budget !== undefined) {
             updateFields.push('budget = ?');
             params.push(budget);
         }
-
         if (assignedTo) {
             updateFields.push('callby = ?');
             params.push(assignedTo);
         }
 
-        // Always update the submiton timestamp and assign_tl
+        // Always update timestamp and assign_tl
         updateFields.push('submiton = CURDATE()');
         updateFields.push('assign_tl = ?');
         params.push(userData[0].tl_name);
 
-        // Add the lead ID to params
         params.push(leadId);
 
-        // Execute update query
+        // Execute update
         const [result] = await db.execute(
             `UPDATE tblmaster SET ${updateFields.join(', ')} WHERE id = ?`,
             params
+        );
+
+        // Insert into task_assign_history
+        await db.execute(
+            `INSERT INTO ssuqgpoy_dashboard_1.task_assign_history
+             (leadId, assignTo, assignFrom, createdAt, updatedAt, status, callDoneAt, callDoneBy)
+             VALUES (?, ?, ?, NOW(), NOW(), ?, NOW(), ?)`,
+            [
+                leadId,
+                assignedTo ? assignedTo : '',
+                existingLead[0].callby,
+                callstatus || 'updated',
+                existingLead[0].callby,
+            ]
         );
 
         // Get updated lead
