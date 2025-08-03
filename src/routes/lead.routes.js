@@ -64,4 +64,7 @@ router.post('/search', leadController.searchLeads);
 
 router.get('/resale-seller', leadController.showAllResalesLeas);
 
+// Daily call completion statistics by TL and users
+router.get('/daily-call-completion-by-tl', leadController.getDailyCallCompletionByTL);
+
 module.exports = router; 

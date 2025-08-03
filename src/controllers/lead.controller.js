@@ -1220,3 +1220,102 @@ exports.showAllResalesLeas = async (req, res) => {
         });
     }
 };
+
+// Get daily call completion statistics by TL and users
+exports.getDailyCallCompletionByTL = async (req, res) => {
+    console.log("getDailyCallCompletionByTL>>", req.query);
+    try {
+        const { startDate, endDate } = req.query;
+
+        // Build date condition
+        let dateCondition = '';
+        let params = [];
+        
+        if (startDate && endDate) {
+            dateCondition = 'AND DATE(tah.callDoneAt) BETWEEN ? AND ?';
+            params.push(startDate, endDate);
+        }
+
+        // Single optimized query to get all data at once
+        const [allData] = await db.execute(
+            `SELECT 
+                DATE(tah.callDoneAt) as callDate,
+                tl.FullName as tlName,
+                tl.Username as tlUsername,
+                u.FullName as userName,
+                u.Username as userUsername,
+                COUNT(*) as callCount
+             FROM ssuqgpoy_dashboard_1.task_assign_history tah
+             INNER JOIN tblusers u ON tah.callDoneBy = u.Username
+             INNER JOIN tblusers tl ON u.tl_name = tl.Username
+             WHERE tah.callDoneAt IS NOT NULL 
+             AND tl.userType = 'tl'
+             ${dateCondition}
+             GROUP BY DATE(tah.callDoneAt), tl.Username, u.Username
+             ORDER BY callDate DESC, tl.FullName, u.FullName`,
+            params
+        );
+
+        // Process the data to organize by date, TL, and users
+        const report = [];
+        const dateMap = new Map();
+
+        allData.forEach(record => {
+            const date = new Date(record.callDate);
+            const formattedDate = `${date.getDate()}/${date.toLocaleDateString('en-GB', { month: 'short' })}/${date.getFullYear()}`;
+            
+            // Initialize date entry if it doesn't exist
+            if (!dateMap.has(formattedDate)) {
+                dateMap.set(formattedDate, {
+                    date: formattedDate,
+                    tls: new Map()
+                });
+            }
+            
+            const dateEntry = dateMap.get(formattedDate);
+            
+            // Initialize TL entry if it doesn't exist
+            if (!dateEntry.tls.has(record.tlUsername)) {
+                dateEntry.tls.set(record.tlUsername, {
+                    tlName: record.tlName,
+                    tlUsername: record.tlUsername,
+                    users: []
+                });
+            }
+            
+            const tlEntry = dateEntry.tls.get(record.tlUsername);
+            
+            // Add user data
+            tlEntry.users.push({
+                userName: record.userName,
+                userUsername: record.userUsername,
+                callCount: record.callCount
+            });
+        });
+
+        // Convert Map to array format for response
+        dateMap.forEach((dateEntry, formattedDate) => {
+            const dateReport = {
+                date: formattedDate,
+                tls: []
+            };
+            
+            dateEntry.tls.forEach((tlEntry, tlUsername) => {
+                dateReport.tls.push(tlEntry);
+            });
+            
+            report.push(dateReport);
+        });
+
+        res.status(200).json({
+            success: true,
+            data: report
+        });
+    } catch (error) {
+        console.error('Get daily call completion by TL error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching daily call completion data by TL'
+        });
+    }
+};
