@@ -1319,3 +1319,97 @@ exports.getDailyCallCompletionByTL = async (req, res) => {
         });
     }
 };
+
+
+exports.getDataByCallStatusFromTlName = async (req, res) => {
+    try {
+        const { callStatus, tlName } = req.query;
+        console.log("Query params:", { callStatus, tlName });
+
+        if (!tlName) {
+            return res.status(400).json({
+                success: false,
+                message: 'TL name is required'
+            });
+        }
+
+        // First, get all users under this TL
+        const [users] = await db.execute(
+            'SELECT Username FROM tblusers WHERE tl_name = ?',
+            [tlName]
+        );
+
+        if (users.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'No users found under this TL'
+            });
+        }
+
+        const userUsernames = users.map(user => user.Username);
+
+        // Build the main query
+        let query = `
+            SELECT 
+                tm.*, 
+                IFNULL(th.callDoneAt, '') AS lastCallDoneAt, 
+                IFNULL(th.callDoneBy, '') AS lastCallDoneBy
+            FROM tblmaster tm
+            LEFT JOIN (
+                SELECT t1.leadId, t1.callDoneAt, t1.callDoneBy
+                FROM ssuqgpoy_dashboard_1.task_assign_history t1
+                INNER JOIN (
+                    SELECT leadId, MAX(callDoneAt) AS maxCallDate
+                    FROM ssuqgpoy_dashboard_1.task_assign_history
+                    WHERE callDoneAt IS NOT NULL
+                    GROUP BY leadId
+                ) t2 ON t1.leadId = t2.leadId AND t1.callDoneAt = t2.maxCallDate
+            ) th ON tm.id = th.leadId
+        `;
+
+        const params = [];
+        const conditions = [];
+
+        // Add TL condition - get leads from users under this TL
+        conditions.push('tm.callby IN (' + userUsernames.map(() => '?').join(',') + ')');
+        params.push(...userUsernames);
+
+        // Add call status condition
+        if (callStatus && callStatus !== 'All') {
+            conditions.push('tm.callstatus = ?');
+            params.push(callStatus);
+        } else if (callStatus === 'All') {
+            // For 'All', include all call statuses
+            // No condition needed
+        } else {
+            // Default: show only leads with empty call status
+            conditions.push('tm.callstatus = ""');
+        }
+
+        // Add WHERE clause
+        if (conditions.length > 0) {
+            query += ' WHERE ' + conditions.join(' AND ');
+        }
+
+        // Order by latest
+        query += ' ORDER BY tm.id DESC';
+
+        console.log("Final query:", query);
+        console.log("Query params:", params);
+
+        // Execute query
+        const [leads] = await db.execute(query, params);
+        console.log("Query results:", leads.length, "leads found");
+
+        res.status(200).json({
+            success: true,
+            data: leads
+        });
+    } catch (error) {
+        console.error("Error in getDataByCallStatusFromTlName:", error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};

@@ -67,4 +67,7 @@ router.get('/resale-seller', leadController.showAllResalesLeas);
 // Daily call completion statistics by TL and users
 router.get('/daily-call-completion-by-tl', leadController.getDailyCallCompletionByTL);
 
+// Get leads by TL name and call status
+router.get('/tl-data', leadController.getDataByCallStatusFromTlName);
+
 module.exports = router; 

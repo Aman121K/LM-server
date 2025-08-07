@@ -20,6 +20,11 @@ router.get('/reports/:callby', auth, userController.getUserReports);
 router.get('/under-tl/:tlId', userController.getUsersByTl);
 router.get('/call-statuses/by-tlname/:tlName', userController.getUsersCallStatusesByTlName);
 
+// simple Call Status from the users that fall into a tl 
+router.get('/all-users-call-status-from-tl/:tlName',userController.getAllUsersCallStatusByTlName)
+
+
+
 router.get('/tls-users-report', async (req, res) => {
     try {
         const [tls] = await db.execute("SELECT id, FullName, Username FROM tblusers WHERE userType = 'tl'");

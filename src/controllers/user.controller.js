@@ -515,3 +515,43 @@ exports.getUsersCallStatusesByTlName = async (req, res) => {
         res.status(500).json({ success: false, message: 'Server error' });
     }
 };
+
+exports.getAllUsersCallStatusByTlName = async (req, res) => {
+    try {
+        const { tlName } = req.params;
+        if (!tlName) {
+            return res.status(400).json({ success: false, message: 'tlName parameter is required' });
+        }
+
+        // 1. Get all users under this TL
+        const [users] = await db.execute('SELECT id, Username, FullName, UserEmail FROM tblusers WHERE tl_name = ?', [tlName]);
+        if (users.length === 0) {
+            return res.status(404).json({ success: false, message: 'No users found for this TL' });
+        }
+
+        // 2. Get all unique call statuses from all users under this TL
+        const userUsernames = users.map(user => user.Username);
+        const placeholders = userUsernames.map(() => '?').join(',');
+        
+        const [allStatuses] = await db.execute(
+            `SELECT DISTINCT callstatus FROM tblmaster 
+             WHERE callby IN (${placeholders}) 
+             AND callstatus != "" 
+             AND callstatus IS NOT NULL`,
+            userUsernames
+        );
+
+        // 3. Format response as array of objects with "name" property
+        const formattedData = allStatuses.map(status => ({
+            name: status.callstatus
+        }));
+
+        res.status(200).json({ 
+            success: true, 
+            data: formattedData
+        });
+    } catch (error) {
+        console.error('Error in getAllUsersCallStatusByTlName:', error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
