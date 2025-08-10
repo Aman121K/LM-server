@@ -126,8 +126,8 @@ exports.createLead = async (req, res) => {
 
 exports.getLeadsByCallStatus = async (req, res) => {
     try {
-        const { callStatus, callby, startDate, endDate, ContactNumber, productName } = req.query;
-        console.log("Query params:", { callStatus, callby, startDate, endDate, ContactNumber, productName });
+        const { callStatus, callby, startDate, endDate, ContactNumber, productname } = req.query;
+        console.log("Query params:", { callStatus, callby, startDate, endDate, ContactNumber, productname });
 
         // Start with base query, join with task_assign_history subquery
         let query = `
@@ -164,9 +164,9 @@ exports.getLeadsByCallStatus = async (req, res) => {
             conditions.push('tm.callstatus = ""');
         }
 
-        if (productName && productName !== 'All') {
+        if (productname && productname.toLowerCase() !== 'all') {
             conditions.push('tm.productname = ?');
-            params.push(productName);
+            params.push(productname);
         }
 
         if (ContactNumber) {
@@ -192,7 +192,7 @@ exports.getLeadsByCallStatus = async (req, res) => {
 
         // Execute query
         const [leads] = await db.execute(query, params);
-        console.log("Query results:", leads.length, "leads found");
+        console.log("Query results:", leads[0], "leads found");
 
         res.status(200).json({
             success: true,
