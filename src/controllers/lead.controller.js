@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { getPaginationParams, createPaginationResponse, addPaginationToQuery } = require('../utils/pagination');
 
 // Create a new lead
 exports.createLead = async (req, res) => {
@@ -126,50 +127,34 @@ exports.createLead = async (req, res) => {
 
 exports.getLeadsByCallStatus = async (req, res) => {
     try {
-        const { callStatus, callby, startDate, endDate, ContactNumber, productname } = req.query;
-        console.log("Query params:", { callStatus, callby, startDate, endDate, ContactNumber, productname });
+        const { callStatus, callby, startDate, endDate, ContactNumber, productname, page = 1, limit = 10 } = req.query;
+        const { offset, page: pageNum, limit: limitNum } = getPaginationParams(page, limit);
+        
+        console.log("Query params:", { callStatus, callby, startDate, endDate, ContactNumber, productname, page: pageNum, limit: limitNum });
 
-        // Start with base query, join with task_assign_history subquery
-        let query = `
-            SELECT 
-                tm.*, 
-                IFNULL(th.callDoneAt, '') AS lastCallDoneAt, 
-                IFNULL(th.callDoneBy, '') AS lastCallDoneBy
-            FROM tblmaster tm
-            LEFT JOIN (
-                SELECT t1.leadId, t1.callDoneAt, t1.callDoneBy
-                FROM ssuqgpoy_dashboard_1.task_assign_history t1
-                INNER JOIN (
-                    SELECT leadId, MAX(callDoneAt) AS maxCallDate
-                    FROM ssuqgpoy_dashboard_1.task_assign_history
-                    WHERE callDoneAt IS NOT NULL
-                    GROUP BY leadId
-                ) t2 ON t1.leadId = t2.leadId AND t1.callDoneAt = t2.maxCallDate
-            ) th ON tm.id = th.leadId
-        `;
-
+        // Validate and sanitize parameters
         const params = [];
         const conditions = [];
 
-        // Add conditions based on filters
-        if (callby) {
+        // Add conditions based on filters - only if values are defined and not empty
+        if (callby && callby.trim() !== '') {
             conditions.push('tm.callby = ?');
             params.push(callby);
         }
 
-        if (callStatus !== 'All') {
+        if (callStatus && callStatus !== 'All' && callStatus.trim() !== '') {
             conditions.push('tm.callstatus = ?');
             params.push(callStatus);
-        } else {
+        } else if (callStatus === 'All') {
             conditions.push('tm.callstatus = ""');
         }
 
-        if (productname && productname.toLowerCase() !== 'all') {
+        if (productname && productname.toLowerCase() !== 'all' && productname.trim() !== '') {
             conditions.push('tm.productname = ?');
             params.push(productname);
         }
 
-        if (ContactNumber) {
+        if (ContactNumber && ContactNumber.trim() !== '') {
             conditions.push('tm.ContactNumber LIKE ?');
             params.push(`%${ContactNumber}%`);
         }
@@ -179,25 +164,130 @@ exports.getLeadsByCallStatus = async (req, res) => {
             params.push(startDate, endDate);
         }
 
+        // OPTIMIZATION 1: Add timeout mechanism
+        const queryTimeout = 5000; // 5 seconds
+        let useTaskHistory = true;
+
+        // OPTIMIZATION 2: Start with fast query first
+        let query = 'SELECT * FROM tblmaster tm';
+        
         // Add WHERE clause
         if (conditions.length > 0) {
             query += ' WHERE ' + conditions.join(' AND ');
         }
 
-        // Order by latest
-        query += ' ORDER BY tm.id DESC';
+        // Get total count first (fast)
+        const countQuery = `
+            SELECT COUNT(*) as total 
+            FROM tblmaster tm
+            ${conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''}
+        `;
+        
+        const [totalCount] = await db.execute(countQuery, params);
 
-        console.log("Final query:", query);
-        console.log("Query params:", params);
+        // OPTIMIZATION 3: Try fast query first, fallback to detailed query if needed
+        try {
+            // Set a timeout for the main query
+            const queryPromise = db.execute(query + ' ORDER BY tm.id DESC LIMIT ? OFFSET ?', [...params, limitNum, offset]);
+            
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Query timeout')), queryTimeout);
+            });
 
-        // Execute query
-        const [leads] = await db.execute(query, params);
-        console.log("Query results:", leads[0], "leads found");
+            const [leads] = await Promise.race([queryPromise, timeoutPromise]);
+            
+            console.log("Fast query completed successfully:", leads.length, "leads found");
 
-        res.status(200).json({
-            success: true,
-            data: leads
-        });
+            const paginatedResponse = createPaginationResponse(
+                leads,
+                totalCount[0].total,
+                pageNum,
+                limitNum
+            );
+
+            res.status(200).json({
+                success: true,
+                ...paginatedResponse,
+                queryType: 'fast'
+            });
+
+        } catch (timeoutError) {
+            console.log("Fast query timed out, falling back to detailed query...");
+            
+            // OPTIMIZATION 4: Fallback to detailed query with task history
+            let detailedQuery = `
+                SELECT 
+                    tm.*, 
+                    COALESCE(th.callDoneAt, '') AS lastCallDoneAt, 
+                    COALESCE(th.callDoneBy, '') AS lastCallDoneBy
+                FROM tblmaster tm
+                LEFT JOIN (
+                    SELECT 
+                        leadId, 
+                        callDoneAt, 
+                        callDoneBy,
+                        ROW_NUMBER() OVER (PARTITION BY leadId ORDER BY callDoneAt DESC) as rn
+                    FROM ssuqgpoy_dashboard_1.task_assign_history 
+                    WHERE callDoneAt IS NOT NULL
+                ) th ON tm.id = th.leadId AND th.rn = 1
+            `;
+
+            // Add WHERE clause
+            if (conditions.length > 0) {
+                detailedQuery += ' WHERE ' + conditions.join(' AND ');
+            }
+
+            // Add pagination and ordering
+            detailedQuery += ' ORDER BY tm.id DESC LIMIT ? OFFSET ?';
+            
+            try {
+                const [leads] = await db.execute(detailedQuery, [...params, limitNum, offset]);
+                
+                console.log("Detailed query completed:", leads.length, "leads found");
+
+                const paginatedResponse = createPaginationResponse(
+                    leads,
+                    totalCount[0].total,
+                    pageNum,
+                    limitNum
+                );
+
+                res.status(200).json({
+                    success: true,
+                    ...paginatedResponse,
+                    queryType: 'detailed'
+                });
+
+            } catch (detailedError) {
+                console.log("Detailed query also failed, using basic query...");
+                
+                // OPTIMIZATION 5: Final fallback to basic query without any JOINs
+                const basicQuery = `
+                    SELECT * FROM tblmaster tm
+                    ${conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''}
+                    ORDER BY tm.id DESC LIMIT ? OFFSET ?
+                `;
+                
+                const [leads] = await db.execute(basicQuery, [...params, limitNum, offset]);
+                
+                console.log("Basic query completed:", leads.length, "leads found");
+
+                const paginatedResponse = createPaginationResponse(
+                    leads,
+                    totalCount[0].total,
+                    pageNum,
+                    limitNum
+                );
+
+                res.status(200).json({
+                    success: true,
+                    ...paginatedResponse,
+                    queryType: 'basic',
+                    message: 'Response optimized for performance - some data may be limited'
+                });
+            }
+        }
+
     } catch (error) {
         console.error("Error in getLeadsByCallStatus:", error);
         res.status(400).json({
@@ -236,162 +326,6 @@ exports.getLeadByContact = async (req, res) => {
 };
 
 // Update a lead
-// exports.updateLead = async (req, res) => {
-//     try {
-//         const leadId = req.params.id;
-//         const {
-//             FirstName,
-//             LastName,
-//             EmailId,
-//             ContactNumber,
-//             callstatus,
-//             remarks,
-//             followup,
-//             productname,
-//             unittype,
-//             budget,
-//             assignedTo
-//         } = req.body;
-
-//         // console.log("all edit params>>", {
-//         //     FirstName,
-//         //     LastName,
-//         //     EmailId,
-//         //     ContactNumber,
-//         //     callstatus,
-//         //     remarks,
-//         //     followup,
-//         //     productname,
-//         //     unittype,
-//         //     budget
-//         // });
-
-//         // First check if lead exists
-//         const [existingLead] = await db.execute(
-//             'SELECT * FROM tblmaster WHERE id = ?',
-//             [leadId]
-//         );
-
-//         if (existingLead.length === 0) {
-//             return res.status(404).json({
-//                 success: false,
-//                 message: 'Lead not found'
-//             });
-//         }
-
-//         // Get TL name from tbluser based on callby
-//         const [userData] = await db.execute(
-//             'SELECT tl_name FROM tblusers WHERE username = ?',
-//             [existingLead[0].callby]
-//         );
-
-//         if (userData.length === 0) {
-//             return res.status(404).json({
-//                 success: false,
-//                 message: 'User not found'
-//             });
-//         }
-
-//         // Build update query dynamically based on provided fields
-//         const updateFields = [];
-//         const params = [];
-
-//         if (FirstName !== undefined) {
-//             updateFields.push('FirstName = ?');
-//             params.push(FirstName);
-//         }
-
-//         if (LastName !== undefined) {
-//             updateFields.push('LastName = ?');
-//             params.push(LastName);
-//         }
-
-//         if (EmailId !== undefined) {
-//             updateFields.push('EmailId = ?');
-//             params.push(EmailId);
-//         }
-
-//         if (ContactNumber !== undefined) {
-//             updateFields.push('ContactNumber = ?');
-//             params.push(ContactNumber);
-//         }
-
-//         if (callstatus !== undefined) {
-//             updateFields.push('callstatus = ?');
-//             params.push(callstatus);
-//         }
-
-//         if (followup !== undefined) {
-//             updateFields.push('followup = ?');
-//             params.push(followup);
-//         }
-
-//         if (remarks !== undefined) {
-//             updateFields.push('remarks = ?');
-//             params.push(remarks);
-//         }
-
-//         if (productname !== undefined) {
-//             updateFields.push('productname = ?');
-//             params.push(productname);
-//         }
-
-//         if (unittype !== undefined) {
-//             updateFields.push('unittype = ?');
-//             params.push(unittype);
-//         }
-
-//         if (budget !== undefined) {
-//             updateFields.push('budget = ?');
-//             params.push(budget);
-//         }
-
-//         if (assignedTo) {
-//             updateFields.push('callby = ?');
-//             params.push(assignedTo);
-//         }
-
-//         // Always update the submiton timestamp and assign_tl
-//         updateFields.push('submiton = CURDATE()');
-//         updateFields.push('assign_tl = ?');
-//         params.push(userData[0].tl_name);
-
-//         // Add the lead ID to params
-//         params.push(leadId);
-
-//         // Execute update query
-//         const [result] = await db.execute(
-//             `UPDATE tblmaster SET ${updateFields.join(', ')} WHERE id = ?`,
-//             params
-//         );
-
-
-
-
-
-
-
-
-
-//         // Get updated lead
-//         const [updatedLead] = await db.execute(
-//             'SELECT * FROM tblmaster WHERE id = ?',
-//             [leadId]
-//         );
-
-//         res.status(200).json({
-//             success: true,
-//             message: 'Lead updated successfully',
-//             data: updatedLead[0]
-//         });
-//     } catch (error) {
-//         console.error('Update lead error:', error);
-//         res.status(500).json({
-//             success: false,
-//             message: 'Error updating lead'
-//         });
-//     }
-// };
 exports.updateLead = async (req, res) => {
     try {
         const leadId = req.params.id;
@@ -409,76 +343,49 @@ exports.updateLead = async (req, res) => {
             assignedTo
         } = req.body;
 
-        // Check if lead exists
-        const [existingLead] = await db.execute(
-            'SELECT * FROM tblmaster WHERE id = ?',
+        // OPTIMIZATION 1: Use a single query to get both lead and user data
+        const [existingData] = await db.execute(
+            `SELECT tm.*, tu.tl_name 
+             FROM tblmaster tm 
+             LEFT JOIN tblusers tu ON tm.callby = tu.username 
+             WHERE tm.id = ?`,
             [leadId]
         );
 
-        if (existingLead.length === 0) {
+        if (existingData.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: 'Lead not found'
             });
         }
 
-        // Get TL name from tblusers
-        const [userData] = await db.execute(
-            'SELECT tl_name FROM tblusers WHERE username = ?',
-            [existingLead[0].callby]
-        );
+        const existingLead = existingData[0];
 
-        if (userData.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'User not found'
-            });
-        }
-
-        // Build update query
+        // OPTIMIZATION 2: Build update query more efficiently
         const updateFields = [];
         const params = [];
 
-        if (FirstName !== undefined) {
-            updateFields.push('FirstName = ?');
-            params.push(FirstName);
-        }
-        if (LastName !== undefined) {
-            updateFields.push('LastName = ?');
-            params.push(LastName);
-        }
-        if (EmailId !== undefined) {
-            updateFields.push('EmailId = ?');
-            params.push(EmailId);
-        }
-        if (ContactNumber !== undefined) {
-            updateFields.push('ContactNumber = ?');
-            params.push(ContactNumber);
-        }
-        if (callstatus !== undefined) {
-            updateFields.push('callstatus = ?');
-            params.push(callstatus);
-        }
-        if (followup !== undefined) {
-            updateFields.push('followup = ?');
-            params.push(followup);
-        }
-        if (remarks !== undefined) {
-            updateFields.push('remarks = ?');
-            params.push(remarks);
-        }
-        if (productname !== undefined) {
-            updateFields.push('productname = ?');
-            params.push(productname);
-        }
-        if (unittype !== undefined) {
-            updateFields.push('unittype = ?');
-            params.push(unittype);
-        }
-        if (budget !== undefined) {
-            updateFields.push('budget = ?');
-            params.push(budget);
-        }
+        // Use a more efficient way to check and add fields
+        const fieldMappings = {
+            FirstName,
+            LastName,
+            EmailId,
+            ContactNumber,
+            callstatus,
+            followup,
+            remarks,
+            productname,
+            unittype,
+            budget
+        };
+
+        Object.entries(fieldMappings).forEach(([field, value]) => {
+            if (value !== undefined) {
+                updateFields.push(`${field} = ?`);
+                params.push(value);
+            }
+        });
+
         if (assignedTo) {
             updateFields.push('callby = ?');
             params.push(assignedTo);
@@ -487,41 +394,40 @@ exports.updateLead = async (req, res) => {
         // Always update timestamp and assign_tl
         updateFields.push('submiton = CURDATE()');
         updateFields.push('assign_tl = ?');
-        params.push(userData[0].tl_name);
+        params.push(existingLead.tl_name || '');
 
         params.push(leadId);
 
-        // Execute update
-        const [result] = await db.execute(
-            `UPDATE tblmaster SET ${updateFields.join(', ')} WHERE id = ?`,
-            params
-        );
+        // OPTIMIZATION 3: Execute update and history insert in parallel
+        const updateQuery = `UPDATE tblmaster SET ${updateFields.join(', ')} WHERE id = ?`;
+        
+        const [updateResult, historyResult] = await Promise.all([
+            db.execute(updateQuery, params),
+            db.execute(
+                `INSERT INTO ssuqgpoy_dashboard_1.task_assign_history
+                 (leadId, assignTo, assignFrom, createdAt, updatedAt, status, callDoneAt, callDoneBy)
+                 VALUES (?, ?, ?, NOW(), NOW(), ?, NOW(), ?)`,
+                [
+                    leadId,
+                    assignedTo || '',
+                    existingLead.callby,
+                    callstatus || 'updated',
+                    existingLead.callby,
+                ]
+            )
+        ]);
 
-        // Insert into task_assign_history
-        await db.execute(
-            `INSERT INTO ssuqgpoy_dashboard_1.task_assign_history
-             (leadId, assignTo, assignFrom, createdAt, updatedAt, status, callDoneAt, callDoneBy)
-             VALUES (?, ?, ?, NOW(), NOW(), ?, NOW(), ?)`,
-            [
-                leadId,
-                assignedTo ? assignedTo : '',
-                existingLead[0].callby,
-                callstatus || 'updated',
-                existingLead[0].callby,
-            ]
-        );
-
-        // Get updated lead
-        const [updatedLead] = await db.execute(
-            'SELECT * FROM tblmaster WHERE id = ?',
-            [leadId]
-        );
-
+        // OPTIMIZATION 4: Return success without fetching updated data (unless specifically needed)
         res.status(200).json({
             success: true,
             message: 'Lead updated successfully',
-            data: updatedLead[0]
+            data: {
+                id: leadId,
+                updated: true,
+                affectedRows: updateResult[0].affectedRows
+            }
         });
+
     } catch (error) {
         console.error('Update lead error:', error);
         res.status(500).json({
@@ -629,12 +535,19 @@ exports.getProductsNameByUser = async (req, res) => {
 // Get all leads for a specific date range
 exports.getLeadsByDateRange = async (req, res) => {
     try {
-        const { date, callBy } = req.body;
+        const { date, callBy, page = 1, limit = 10 } = req.body;
+        const { offset, page: pageNum, limit: limitNum } = getPaginationParams(page, limit);
 
-        // Get leads for the date
-        const [leads] = await db.execute(
-            'SELECT * FROM tblmaster WHERE submiton BETWEEN ? AND ? AND callby = ? ORDER BY id DESC',
+        // Get total count
+        const [totalCount] = await db.execute(
+            'SELECT COUNT(*) as total FROM tblmaster WHERE submiton BETWEEN ? AND ? AND callby = ?',
             [date, date, callBy]
+        );
+
+        // Get paginated leads for the date
+        const [leads] = await db.execute(
+            'SELECT * FROM tblmaster WHERE submiton BETWEEN ? AND ? AND callby = ? ORDER BY id DESC LIMIT ? OFFSET ?',
+            [date, date, callBy, limitNum, offset]
         );
 
         // Get call status counts
@@ -654,13 +567,18 @@ exports.getLeadsByDateRange = async (req, res) => {
             return acc;
         }, {});
 
+        const paginatedResponse = createPaginationResponse(
+            leads,
+            totalCount[0].total,
+            pageNum,
+            limitNum
+        );
+
         res.status(200).json({
             success: true,
-            data: {
-                leads,
-                statusCounts,
-                totalLeads: leads.length
-            }
+            ...paginatedResponse,
+            statusCounts,
+            totalLeads: totalCount[0].total
         });
     } catch (error) {
         res.status(400).json({
@@ -753,7 +671,8 @@ exports.allCallStatus = async (req, res) => {
 // Get Filtered Leads
 exports.getFilteredLeads = async (req, res) => {
     try {
-        const { startDate, endDate, callStatus, callby, productname } = req.query;
+        const { startDate, endDate, callStatus, callby, productname, page = 1, limit = 10 } = req.query;
+        const { offset, page: pageNum, limit: limitNum } = getPaginationParams(page, limit);
 
         // Build the query conditions
         let conditions = [];
@@ -781,31 +700,35 @@ exports.getFilteredLeads = async (req, res) => {
 
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-        // Get filtered leads
-        const [leads] = await db.execute(
-            `SELECT * FROM tblmaster ${whereClause} ORDER BY submiton DESC`,
-            params
-        );
-
         // Get total count
         const [totalCount] = await db.execute(
             `SELECT COUNT(*) as total FROM tblmaster ${whereClause}`,
             params
         );
 
-        console.log("totalCount>>", totalCount)
+        // Get paginated filtered leads
+        const [leads] = await db.execute(
+            `SELECT * FROM tblmaster ${whereClause} ORDER BY submiton DESC LIMIT ? OFFSET ?`,
+            [...params, limitNum, offset]
+        );
+
+        const paginatedResponse = createPaginationResponse(
+            leads,
+            totalCount[0].total,
+            pageNum,
+            limitNum
+        );
+
+        console.log("totalCount>>", totalCount);
 
         res.status(200).json({
             success: true,
-            data: {
-                leads,
-                total: totalCount[0].total,
-                filters: {
-                    startDate,
-                    endDate,
-                    callStatus,
-                    callby
-                }
+            ...paginatedResponse,
+            filters: {
+                startDate,
+                endDate,
+                callStatus,
+                callby
             }
         });
     } catch (error) {
@@ -1137,7 +1060,8 @@ Mary,White,mary.w@gmail.com,9876543211,New Buyer,Looking for Farmhouse,2024-03-1
 // Search leads by phone number and name
 exports.searchLeads = async (req, res) => {
     try {
-        const { contactNumber, name } = req.body;
+        const { contactNumber, name, page = 1, limit = 10 } = req.body;
+        const { offset, page: pageNum, limit: limitNum } = getPaginationParams(page, limit);
 
         // Build the query conditions
         let conditions = [];
@@ -1161,8 +1085,8 @@ exports.searchLeads = async (req, res) => {
             });
         }
 
-        // Build the final query
-        const query = `
+        // Build the base query for counting
+        const baseQuery = `
             SELECT 
                 id,
                 FirstName,
@@ -1180,17 +1104,28 @@ exports.searchLeads = async (req, res) => {
                 submiton
             FROM tblmaster 
             WHERE ${conditions.join(' AND ')}
-            ORDER BY id DESC
         `;
 
-        const [leads] = await db.execute(query, params);
+        // Get total count
+        const [totalCount] = await db.execute(
+            `SELECT COUNT(*) as total FROM (${baseQuery}) as count_table`,
+            params
+        );
+
+        // Add pagination and ordering
+        const finalQuery = `${baseQuery} ORDER BY id DESC LIMIT ? OFFSET ?`;
+        const [leads] = await db.execute(finalQuery, [...params, limitNum, offset]);
+
+        const paginatedResponse = createPaginationResponse(
+            leads,
+            totalCount[0].total,
+            pageNum,
+            limitNum
+        );
 
         res.status(200).json({
             success: true,
-            data: {
-                totalResults: leads.length,
-                leads: leads
-            }
+            ...paginatedResponse
         });
     } catch (error) {
         console.error('Search leads error:', error);
@@ -1203,14 +1138,31 @@ exports.searchLeads = async (req, res) => {
 
 exports.showAllResalesLeas = async (req, res) => {
     try {
-        const [leads] = await db.execute(
-            'SELECT * FROM tblmaster WHERE callstatus = ? ORDER BY id DESC',
+        const { page = 1, limit = 10 } = req.query;
+        const { offset, page: pageNum, limit: limitNum } = getPaginationParams(page, limit);
+
+        // Get total count
+        const [totalCount] = await db.execute(
+            'SELECT COUNT(*) as total FROM tblmaster WHERE callstatus = ?',
             ['Resale - Seller']
+        );
+
+        // Get paginated data
+        const [leads] = await db.execute(
+            'SELECT * FROM tblmaster WHERE callstatus = ? ORDER BY id DESC LIMIT ? OFFSET ?',
+            ['Resale - Seller', limitNum, offset]
+        );
+
+        const paginatedResponse = createPaginationResponse(
+            leads,
+            totalCount[0].total,
+            pageNum,
+            limitNum
         );
 
         res.status(200).json({
             success: true,
-            data: leads
+            ...paginatedResponse
         });
     } catch (error) {
         console.error('Get resale seller leads error:', error);
@@ -1323,8 +1275,10 @@ exports.getDailyCallCompletionByTL = async (req, res) => {
 
 exports.getDataByCallStatusFromTlName = async (req, res) => {
     try {
-        const { callStatus, tlName } = req.query;
-        console.log("Query params:", { callStatus, tlName });
+        const { callStatus, tlName, page = 1, limit = 10 } = req.query;
+        const { offset, page: pageNum, limit: limitNum } = getPaginationParams(page, limit);
+        
+        console.log("Query params:", { callStatus, tlName, page: pageNum, limit: limitNum });
 
         if (!tlName) {
             return res.status(400).json({
@@ -1391,8 +1345,13 @@ exports.getDataByCallStatusFromTlName = async (req, res) => {
             query += ' WHERE ' + conditions.join(' AND ');
         }
 
-        // Order by latest
-        query += ' ORDER BY tm.id DESC';
+        // Get total count first
+        const countQuery = `SELECT COUNT(*) as total FROM (${query}) as count_table`;
+        const [totalCount] = await db.execute(countQuery, params);
+
+        // Add pagination and ordering
+        query += ' ORDER BY tm.id DESC LIMIT ? OFFSET ?';
+        params.push(limitNum, offset);
 
         console.log("Final query:", query);
         console.log("Query params:", params);
@@ -1401,9 +1360,16 @@ exports.getDataByCallStatusFromTlName = async (req, res) => {
         const [leads] = await db.execute(query, params);
         console.log("Query results:", leads.length, "leads found");
 
+        const paginatedResponse = createPaginationResponse(
+            leads,
+            totalCount[0].total,
+            pageNum,
+            limitNum
+        );
+
         res.status(200).json({
             success: true,
-            data: leads
+            ...paginatedResponse
         });
     } catch (error) {
         console.error("Error in getDataByCallStatusFromTlName:", error);

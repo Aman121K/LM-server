@@ -2,6 +2,7 @@ const db = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
+const { getPaginationParams, createPaginationResponse, addPaginationToQuery } = require('../utils/pagination');
 
 // Register a new user
 exports.register = async (req, res) => {
@@ -237,8 +238,18 @@ exports.forgotPassword = async (req, res) => {
 };
 exports.getTls = async (req, res) => {
     try {
+        const { page = 1, limit = 10 } = req.query;
+        const { offset, page: pageNum, limit: limitNum } = getPaginationParams(page, limit);
+
+        // Get total count
+        const [totalCount] = await db.execute(
+            'SELECT COUNT(*) as total FROM tblusers'
+        );
+
+        // Get paginated data
         const [users] = await db.execute(
-            'SELECT id, FullName, Username, UserEmail FROM tblusers'
+            'SELECT id, FullName, Username, UserEmail FROM tblusers LIMIT ? OFFSET ?',
+            [limitNum, offset]
         );
 
         if (users.length === 0) {
@@ -248,9 +259,16 @@ exports.getTls = async (req, res) => {
             });
         }
 
+        const paginatedResponse = createPaginationResponse(
+            users,
+            totalCount[0].total,
+            pageNum,
+            limitNum
+        );
+
         res.status(200).json({
             success: true,
-            data: users
+            ...paginatedResponse
         });
     } catch (error) {
         res.status(400).json({
@@ -258,15 +276,33 @@ exports.getTls = async (req, res) => {
             message: error.message
         });
     }
-}
+};
 exports.allUserList = async (req, res) => {
     try {
-        const [users] = await db.execute(
-            'SELECT * FROM tblusers order by id desc'
+        const { page = 1, limit = 10 } = req.query;
+        const { offset, page: pageNum, limit: limitNum } = getPaginationParams(page, limit);
+
+        // Get total count
+        const [totalCount] = await db.execute(
+            'SELECT COUNT(*) as total FROM tblusers'
         );
+
+        // Get paginated data
+        const [users] = await db.execute(
+            'SELECT * FROM tblusers ORDER BY id DESC LIMIT ? OFFSET ?',
+            [limitNum, offset]
+        );
+
+        const paginatedResponse = createPaginationResponse(
+            users,
+            totalCount[0].total,
+            pageNum,
+            limitNum
+        );
+
         res.status(200).json({
             success: true,
-            data: users
+            ...paginatedResponse
         });
     } catch (error) {
         res.status(400).json({
@@ -274,7 +310,7 @@ exports.allUserList = async (req, res) => {
             message: error.message
         });
     }
-}
+};
 
 // Delete User
 exports.deleteUser = async (req, res) => {
@@ -470,10 +506,31 @@ exports.getUserReports = async (req, res) => {
 exports.getUsersByTl = async (req, res) => {
     try {
         const { tlId } = req.params;
-        const [users] = await db.execute('SELECT * FROM tblusers WHERE tl_name = ?', [tlId]);
+        const { page = 1, limit = 10 } = req.query;
+        const { offset, page: pageNum, limit: limitNum } = getPaginationParams(page, limit);
+
+        // Get total count
+        const [totalCount] = await db.execute(
+            'SELECT COUNT(*) as total FROM tblusers WHERE tl_name = ?',
+            [tlId]
+        );
+
+        // Get paginated data
+        const [users] = await db.execute(
+            'SELECT * FROM tblusers WHERE tl_name = ? LIMIT ? OFFSET ?',
+            [tlId, limitNum, offset]
+        );
+
+        const paginatedResponse = createPaginationResponse(
+            users,
+            totalCount[0].total,
+            pageNum,
+            limitNum
+        );
+
         res.status(200).json({
             success: true,
-            data: users
+            ...paginatedResponse
         });
     } catch (error) {
         console.error('Get users by TL error:', error);
@@ -482,7 +539,7 @@ exports.getUsersByTl = async (req, res) => {
             message: 'Error fetching users by TL'
         });
     }
-}
+};
 // Get all users under a TL and their call statuses
 exports.getUsersCallStatusesByTlName = async (req, res) => {
     try {

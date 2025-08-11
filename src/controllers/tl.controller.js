@@ -1,14 +1,33 @@
 const db = require('../config/db');
+const { getPaginationParams, createPaginationResponse } = require('../utils/pagination');
 
 // Get all TLs
 exports.getAllTLs = async (req, res) => {
     try {
-        const [tls] = await db.execute(
-            'SELECT id, username, tl_name, email FROM tblusers WHERE role = "tl"'
+        const { page = 1, limit = 10 } = req.query;
+        const { offset, page: pageNum, limit: limitNum } = getPaginationParams(page, limit);
+
+        // Get total count
+        const [totalCount] = await db.execute(
+            'SELECT COUNT(*) as total FROM tblusers WHERE role = "tl"'
         );
+
+        // Get paginated data
+        const [tls] = await db.execute(
+            'SELECT id, username, tl_name, email FROM tblusers WHERE role = "tl" LIMIT ? OFFSET ?',
+            [limitNum, offset]
+        );
+
+        const paginatedResponse = createPaginationResponse(
+            tls,
+            totalCount[0].total,
+            pageNum,
+            limitNum
+        );
+
         res.status(200).json({
             success: true,
-            data: tls
+            ...paginatedResponse
         });
     } catch (error) {
         res.status(400).json({
@@ -147,8 +166,10 @@ exports.getDailyPerformance = async (req, res) => {
 
 exports.getParticularTlData=async(req,res)=>{
     try {
-        const { callStatus, callby, startDate, endDate, ContactNumber } = req.query;
-        console.log("Query params:", { callStatus, callby, startDate, endDate, ContactNumber });
+        const { callStatus, callby, startDate, endDate, ContactNumber, page = 1, limit = 10 } = req.query;
+        const { offset, page: pageNum, limit: limitNum } = getPaginationParams(page, limit);
+        
+        console.log("Query params:", { callStatus, callby, startDate, endDate, ContactNumber, page: pageNum, limit: limitNum });
 
         // Start with base query
         let query = 'SELECT * FROM tblmaster';
@@ -185,8 +206,13 @@ exports.getParticularTlData=async(req,res)=>{
             query += ' WHERE ' + conditions.join(' AND ');
         }
 
-        // Add order by
-        query += ' ORDER BY id DESC';
+        // Get total count first
+        const countQuery = `SELECT COUNT(*) as total FROM (${query}) as count_table`;
+        const [totalCount] = await db.execute(countQuery, params);
+
+        // Add pagination and ordering
+        query += ' ORDER BY id DESC LIMIT ? OFFSET ?';
+        params.push(limitNum, offset);
 
         console.log("Final query:", query);
         console.log("Query params:", params);
@@ -194,12 +220,19 @@ exports.getParticularTlData=async(req,res)=>{
         const [leads] = await db.execute(query, params);
         console.log("Query results:", leads.length, "leads found");
 
+        const paginatedResponse = createPaginationResponse(
+            leads,
+            totalCount[0].total,
+            pageNum,
+            limitNum
+        );
+
         res.status(200).json({
             success: true,
-            data: leads
+            ...paginatedResponse
         });
     } catch (error) {
-        console.error("Error in getLeadsByCallStatus:", error);
+        console.error("Error in getParticularTlData:", error);
         res.status(400).json({
             success: false,
             message: error.message
