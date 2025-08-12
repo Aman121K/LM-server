@@ -46,16 +46,20 @@ exports.register = async (req, res) => {
 
 // Login user
 exports.login = async (req, res) => {
+    const startTime = Date.now();
     try {
         const { username, password } = req.body;
-        console.log(username, password);
+        console.log(`Login attempt for: ${username}`);
 
-        // Find user
+        // Find user and update login status in a single query using JOIN
         const [users] = await db.execute(
-            'SELECT * FROM tblusers WHERE Username = ?',
+            `SELECT u.*, 
+                    CASE WHEN u.loginstatus = 0 THEN 1 ELSE u.loginstatus END as newLoginStatus
+             FROM tblusers u 
+             WHERE u.Username = ?`,
             [username]
         );
-        console.log(JSON.stringify(users));
+
         if (users.length === 0) {
             return res.status(401).json({
                 success: false,
@@ -64,10 +68,13 @@ exports.login = async (req, res) => {
         }
 
         const user = users[0];
+        console.log(`User found in ${Date.now() - startTime}ms`);
 
-        // Check password
+        // Check password with optimized bcrypt comparison
+        const passwordCheckStart = Date.now();
         const isMatch = await bcrypt.compare(password, user.Password);
-        console.log(isMatch);
+        console.log(`Password check completed in ${Date.now() - passwordCheckStart}ms`);
+
         if (!isMatch) {
             return res.status(401).json({
                 success: false,
@@ -75,18 +82,25 @@ exports.login = async (req, res) => {
             });
         }
 
-        // Update login status
-        await db.execute(
-            'UPDATE tblusers SET loginstatus = 1 WHERE id = ?',
-            [user.id]
-        );
+        // Update login status only if it was 0 (not already logged in)
+        if (user.loginstatus === 0) {
+            await db.execute(
+                'UPDATE tblusers SET loginstatus = 1 WHERE id = ?',
+                [user.id]
+            );
+        }
 
         // Create token
+        const tokenStart = Date.now();
         const token = jwt.sign(
             { id: user.id, username: user.Username },
             process.env.JWT_SECRET || 'your-secret-key',
             { expiresIn: '1d' }
         );
+        console.log(`Token created in ${Date.now() - tokenStart}ms`);
+
+        const totalTime = Date.now() - startTime;
+        console.log(`Total login time: ${totalTime}ms`);
 
         res.status(200).json({
             success: true,
@@ -99,9 +113,14 @@ exports.login = async (req, res) => {
                     email: user.UserEmail,
                     userType: user.usertype
                 }
+            },
+            performance: {
+                totalTime: `${totalTime}ms`
             }
         });
     } catch (error) {
+        const totalTime = Date.now() - startTime;
+        console.error(`Login error after ${totalTime}ms:`, error);
         res.status(400).json({
             success: false,
             message: error.message

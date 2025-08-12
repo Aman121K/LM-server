@@ -1,14 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../config/database');
-const auth = require('../middleware/auth');
+const db = require('../src/config/db');
+const auth = require('../src/middleware/auth');
 const ExcelJS = require('exceljs');
 const multer = require('multer');
 const upload = multer({ dest: 'uploads/' });
-
-const mongoose = require('mongoose');
-const User = require('../src/models/user.model');
-const Lead = require('../src/models/lead.model');
 
 // Get users with filters
 router.post('/users', auth, async (req, res) => {
@@ -158,8 +154,11 @@ router.post('/export', auth, async (req, res) => {
   }
 });
 
-// Upload users data
+// Upload users data - OPTIMIZED VERSION for tblusers table
 router.post('/upload', auth, upload.single('file'), async (req, res) => {
+  const startTime = Date.now();
+  let fileReadTime, processTime, dbInsertTime;
+  
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -168,84 +167,205 @@ router.post('/upload', auth, upload.single('file'), async (req, res) => {
       });
     }
 
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(req.file.path);
-
-    const worksheet = workbook.getWorksheet(1);
-    const users = [];
-
-    worksheet.eachRow((row, rowNumber) => {
-      if (rowNumber > 1) { // Skip header row
-        const user = {
-          name: row.getCell(1).value,
-          email: row.getCell(2).value,
-          role: row.getCell(3).value || 'user',
-          status: row.getCell(4).value || 'active'
-        };
-        users.push(user);
-      }
-    });
-
-    // Insert users into database
-    for (const user of users) {
-      await db.query(
-        'INSERT INTO users (name, email, role, status) VALUES (?, ?, ?, ?)',
-        [user.name, user.email, user.role, user.status]
-      );
-    }
-
-    res.json({
-      success: true,
-      message: 'Users imported successfully'
-    });
-
-  } catch (error) {
-    console.error('Upload error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error importing users'
-    });
-  }
-});
-
-// Admin-only: Get TLs and their users with lead stats
-router.get('/tls-users-report', async (req, res) => {
-  try {
-
-    const tls = await User.find({ userType: 'tl' });
-    console.log("tls>>",tls)
-    const report = [];
-
-    for (const tl of tls) {
-      // Find users under this TL
-      const users = await User.find({ tlName: tl.username });
-      const userStats = [];
-      for (const user of users) {
-        // Count leads for this user
-        const totalData = await Lead.countDocuments({ callBy: user.username });
-        const totalCallsDone = await Lead.countDocuments({ callBy: user.username, callStatus: 'done' });
-        const totalCallsPending = await Lead.countDocuments({ callBy: user.username, callStatus: { $ne: 'done' } });
-        userStats.push({
-          userName: user.fullName,
-          totalData,
-          totalCallsDone,
-          totalCallsPending
-        });
-      }
-      report.push({
-        tlName: tl.fullName,
-        users: userStats
+    // Validate file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (req.file.size > maxSize) {
+      return res.status(400).json({
+        success: false,
+        message: 'File size too large. Maximum size is 10MB'
       });
     }
 
-    res.json({ success: true, data: report });
+    console.log(`📁 Processing file: ${req.file.originalname} (${(req.file.size / 1024).toFixed(2)}KB)`);
+
+    // Read Excel file
+    const fileReadStart = Date.now();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(req.file.path);
+    fileReadTime = Date.now() - fileReadStart;
+    console.log(`📖 File read time: ${fileReadTime}ms`);
+
+    const worksheet = workbook.getWorksheet(1);
+    const totalRows = worksheet.rowCount - 1; // Exclude header
+    console.log(`📊 Total rows to process: ${totalRows}`);
+
+    if (totalRows === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No data rows found in file'
+      });
+    }
+
+    // Process rows in batches
+    const processStart = Date.now();
+    const users = [];
+    const batchSize = 100; // Process 100 rows at a time
+    let processedRows = 0;
+    let skippedRows = 0;
+
+    for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
+      const row = worksheet.getRow(rowNumber);
+      
+      // Validate required fields - map to your tblusers schema
+      const fullName = row.getCell(1).value;
+      const username = row.getCell(2).value;
+      const userEmail = row.getCell(3).value;
+      const userType = row.getCell(4).value || 'user';
+      const tlName = row.getCell(5).value || null;
+      
+      if (!fullName || !username || !userEmail) {
+        console.warn(`⚠️  Skipping row ${rowNumber}: Missing required fields (FullName, Username, or UserEmail)`);
+        skippedRows++;
+        continue;
+      }
+
+      // Generate a default password for new users
+      const defaultPassword = Math.random().toString(36).slice(-8);
+      
+      const user = {
+        FullName: fullName.toString().trim(),
+        Username: username.toString().trim(),
+        UserEmail: userEmail.toString().trim(),
+        Password: defaultPassword, // Will be hashed before insert
+        userType: userType.toString().trim(),
+        tl_name: tlName ? tlName.toString().trim() : null,
+        loginstatus: 0, // Default to logged out
+        created_at: new Date()
+      };
+      
+      users.push(user);
+      processedRows++;
+
+      // Process in batches
+      if (users.length >= batchSize || rowNumber === worksheet.rowCount) {
+        console.log(`🔄 Processing batch ${Math.ceil(processedRows / batchSize)}/${Math.ceil(totalRows / batchSize)}`);
+        
+        // Insert batch into database
+        const batchStart = Date.now();
+        await insertUsersBatch(users);
+        const batchTime = Date.now() - batchStart;
+        console.log(`✅ Batch processed in ${batchTime}ms`);
+        
+        // Clear batch array
+        users.length = 0;
+      }
+    }
+
+    processTime = Date.now() - processStart;
+    const totalTime = Date.now() - startTime;
+
+    // Clean up uploaded file
+    const fs = require('fs');
+    if (fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+      console.log(`🗑️  Cleaned up temporary file: ${req.file.path}`);
+    }
+
+    console.log(`🎉 Upload completed in ${totalTime}ms`);
+    console.log(`   - File read: ${fileReadTime}ms`);
+    console.log(`   - Processing: ${processTime}ms`);
+    console.log(`   - Total rows: ${processedRows}`);
+    console.log(`   - Skipped rows: ${skippedRows}`);
+
+    res.json({
+      success: true,
+      message: `Users imported successfully (${processedRows} users, ${skippedRows} skipped)`,
+      performance: {
+        totalTime: `${totalTime}ms`,
+        fileReadTime: `${fileReadTime}ms`,
+        processTime: `${processTime}ms`,
+        rowsProcessed: processedRows,
+        rowsSkipped: skippedRows,
+        averageTimePerRow: `${(totalTime / processedRows).toFixed(2)}ms`
+      },
+      summary: {
+        totalRows: totalRows,
+        processedRows: processedRows,
+        skippedRows: skippedRows,
+        defaultPassword: 'Default password generated for new users. They should change it on first login.'
+      }
+    });
+
   } catch (error) {
-    console.error('TLS report error:', error);
-    res.status(500).json({ success: false, message: 'Error generating report' });
+    const totalTime = Date.now() - startTime;
+    console.error(`❌ Upload failed after ${totalTime}ms:`, error);
+    
+    // Clean up file on error
+    if (req.file && req.file.path) {
+      const fs = require('fs');
+      if (fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Error importing users',
+      performance: {
+        totalTime: `${totalTime}ms`,
+        error: error.message
+      }
+    });
   }
 });
 
-router.get('/tls-users-report',async (req, res) => {
+// Helper function to insert users in batches for tblusers table
+async function insertUsersBatch(users) {
+  if (users.length === 0) return;
+
+  try {
+    // Use transaction for data consistency
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    try {
+      // Hash passwords for all users in the batch
+      const bcrypt = require('bcryptjs');
+      const hashedUsers = await Promise.all(users.map(async (user) => {
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(user.Password, salt);
+        return {
+          ...user,
+          Password: hashedPassword
+        };
+      }));
+
+      // Prepare batch insert statement for tblusers table
+      const placeholders = hashedUsers.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(',');
+      const values = hashedUsers.flatMap(user => [
+        user.FullName,
+        user.Username, 
+        user.UserEmail,
+        user.Password,
+        user.userType,
+        user.tl_name,
+        user.loginstatus,
+        user.created_at
+      ]);
+      
+      const [result] = await connection.execute(
+        `INSERT INTO tblusers (FullName, Username, UserEmail, Password, userType, tl_name, loginstatus, created_at) VALUES ${placeholders}`,
+        values
+      );
+
+      await connection.commit();
+      console.log(`✅ Inserted ${users.length} users in batch`);
+      
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+    
+  } catch (error) {
+    console.error('Batch insert error:', error);
+    throw error;
+  }
+}
+
+// Admin-only: Get TLs and their users with lead stats (MySQL version)
+router.get('/tls-users-report', async (req, res) => {
   try {
     const [tls] = await db.execute("SELECT id, FullName, Username FROM tblusers WHERE userType = 'tl'");
     const report = [];

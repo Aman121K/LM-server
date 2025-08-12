@@ -533,54 +533,123 @@ exports.getProductsNameByUser = async (req, res) => {
 };
 
 // Get all leads for a specific date range
+// exports.getLeadsByDateRange = async (req, res) => {
+//     try {
+//         const { date, callBy, page = 1, limit = 10 } = req.body;
+//         const { offset, page: pageNum, limit: limitNum } = getPaginationParams(page, limit);
+
+//         // Get total count
+//         const [totalCount] = await db.execute(
+//             'SELECT COUNT(*) as total FROM tblmaster WHERE submiton BETWEEN ? AND ? AND callby = ?',
+//             [date, date, callBy]
+//         );
+
+//         // Get paginated leads for the date
+//         const [leads] = await db.execute(
+//             'SELECT * FROM tblmaster WHERE submiton BETWEEN ? AND ? AND callby = ? ORDER BY id DESC LIMIT ? OFFSET ?',
+//             [date, date, callBy, limitNum, offset]
+//         );
+
+//         // Get call status counts
+//         const [callStatusCounts] = await db.execute(
+//             `SELECT callstatus, COUNT(*) as count 
+//              FROM tblmaster 
+//              WHERE submiton BETWEEN ? AND ? 
+//              AND callby = ? 
+//              AND callstatus != ""
+//              GROUP BY callstatus`,
+//             [date, date, callBy]
+//         );
+
+//         // Format the counts into a more readable object
+//         const statusCounts = callStatusCounts.reduce((acc, curr) => {
+//             acc[curr.callstatus] = curr.count;
+//             return acc;
+//         }, {});
+
+//         const paginatedResponse = createPaginationResponse(
+//             leads,
+//             totalCount[0].total,
+//             pageNum,
+//             limitNum
+//         );
+
+//         res.status(200).json({
+//             success: true,
+//             ...paginatedResponse,
+//             statusCounts,
+//             totalLeads: totalCount[0].total
+//         });
+//     } catch (error) {
+//         res.status(400).json({
+//             success: false,
+//             message: error.message
+//         });
+//     }
+// };
+
+
 exports.getLeadsByDateRange = async (req, res) => {
     try {
-        const { date, callBy, page = 1, limit = 10 } = req.body;
-        const { offset, page: pageNum, limit: limitNum } = getPaginationParams(page, limit);
+        const { date, callBy } = req.body;
 
-        // Get total count
-        const [totalCount] = await db.execute(
-            'SELECT COUNT(*) as total FROM tblmaster WHERE submiton BETWEEN ? AND ? AND callby = ?',
-            [date, date, callBy]
+        // OPTIMIZATION: Query task_assign_history directly instead of tblmaster
+        // Get all call records for the specific date and user
+        const [callRecords] = await db.execute(
+            `SELECT 
+                leadId,
+                status as callstatus,
+                callDoneAt,
+                callDoneBy,
+                assignTo,
+                assignFrom,
+                createdAt
+             FROM ssuqgpoy_dashboard_1.task_assign_history 
+             WHERE DATE(callDoneAt) = ? 
+             AND assignFrom = ?
+             ORDER BY callDoneAt DESC`,
+            [date, callBy]
         );
 
-        // Get paginated leads for the date
-        const [leads] = await db.execute(
-            'SELECT * FROM tblmaster WHERE submiton BETWEEN ? AND ? AND callby = ? ORDER BY id DESC LIMIT ? OFFSET ?',
-            [date, date, callBy, limitNum, offset]
-        );
-
-        // Get call status counts
-        const [callStatusCounts] = await db.execute(
-            `SELECT callstatus, COUNT(*) as count 
-             FROM tblmaster 
-             WHERE submiton BETWEEN ? AND ? 
-             AND callby = ? 
-             AND callstatus != ""
-             GROUP BY callstatus`,
-            [date, date, callBy]
-        );
-
-        // Format the counts into a more readable object
-        const statusCounts = callStatusCounts.reduce((acc, curr) => {
-            acc[curr.callstatus] = curr.count;
+        // Get call status counts - count ALL records, not just unique leads
+        const statusCounts = callRecords.reduce((acc, record) => {
+            if (record.callstatus && record.callstatus !== '') {
+                acc[record.callstatus] = (acc[record.callstatus] || 0) + 1;
+            }
             return acc;
         }, {});
 
-        const paginatedResponse = createPaginationResponse(
-            leads,
-            totalCount[0].total,
-            pageNum,
-            limitNum
-        );
+        // Get unique leads with their latest call status
+        const leadsMap = new Map();
+        callRecords.forEach(record => {
+            if (!leadsMap.has(record.leadId)) {
+                leadsMap.set(record.leadId, {
+                    id: record.leadId,
+                    callstatus: record.callstatus,
+                    callDoneAt: record.callDoneAt,
+                    callDoneBy: record.callDoneBy,
+                    assignTo: record.assignTo,
+                    assignFrom: record.assignFrom,
+                    createdAt: record.createdAt
+                });
+            }
+        });
+
+        const leads = Array.from(leadsMap.values());
 
         res.status(200).json({
             success: true,
-            ...paginatedResponse,
-            statusCounts,
-            totalLeads: totalCount[0].total
+            data: {
+                leads,
+                statusCounts,
+                totalLeads: leads.length,
+                totalCallRecords: callRecords.length, // Add this to show total call records
+                queryType: 'optimized',
+                dataSource: 'task_assign_history_only'
+            }
         });
     } catch (error) {
+        console.error('Error in getLeadsByDateRange:', error);
         res.status(400).json({
             success: false,
             message: error.message
@@ -862,70 +931,87 @@ exports.getCallingDoneByDate = async (req, res) => {
     }
 };
 
-// Get combined database summary and calling done records
+// Get combined database summary and calling done records - OPTIMIZED VERSION
 exports.getUserDashboardData = async (req, res) => {
     try {
         const { callBy } = req.body;
 
-        // Get total data count
-        const [totalData] = await db.execute(
-            'SELECT COUNT(*) as TotalData FROM tblmaster WHERE callby = ?',
-            [callBy]
-        );
-
-        // Get calling done count (where callstatus is not empty)
-        const [callingDone] = await db.execute(
-            'SELECT COUNT(*) as callingdone FROM tblmaster WHERE callby = ? AND callstatus != ""',
-            [callBy]
-        );
-
-        // Get pending count (where callstatus is empty)
-        const [pending] = await db.execute(
-            'SELECT COUNT(*) as pending FROM tblmaster WHERE callby = ? AND callstatus = ""',
-            [callBy]
-        );
-
-        // Get call status distribution
-        const [callStatus] = await db.execute(
-            `SELECT callstatus, COUNT(*) as tcount 
-             FROM tblmaster 
-             WHERE callby = ? AND callstatus != "" 
-             GROUP BY callstatus`,
-            [callBy]
-        );
-
-        // Get calling done by date
-        const [callingDoneByDate] = await db.execute(
+        // OPTIMIZATION: Single query to get all summary data at once
+        const [summaryData] = await db.execute(
             `SELECT 
-                DATE(submiton) as submiton,
-                COUNT(*) as sbcount
+                COUNT(*) as TotalData,
+                SUM(CASE WHEN callstatus != "" THEN 1 ELSE 0 END) as callingdone,
+                SUM(CASE WHEN callstatus = "" THEN 1 ELSE 0 END) as pending
              FROM tblmaster 
-             WHERE callby = ? AND callstatus != ""
-             GROUP BY DATE(submiton)
-             ORDER BY submiton DESC`,
+             WHERE callby = ?`,
             [callBy]
         );
 
-        // Format dates to match your PHP output format (d-M-y)
-        const formattedCallingDoneByDate = callingDoneByDate.map(record => ({
-            submiton: new Date(record.submiton).toLocaleDateString('en-GB', {
-                day: '2-digit',
-                month: 'short',
-                year: '2-digit'
-            }).replace(/ /g, '-'),
-            sbcount: record.sbcount
+        // OPTIMIZATION: Single query to get call status distribution and date-wise data
+        const [callData] = await db.execute(
+            `SELECT 
+                status as callstatus,
+                DATE(callDoneAt) as callDate,
+                COUNT(*) as count
+             FROM ssuqgpoy_dashboard_1.task_assign_history 
+             WHERE assignFrom = ? AND callDoneAt IS NOT NULL AND status != ""
+             GROUP BY status, DATE(callDoneAt)
+             ORDER BY callDate DESC, status`,
+            [callBy]
+        );
+
+        // Process call status distribution
+        const callStatusMap = new Map();
+        const dateWiseMap = new Map();
+
+        callData.forEach(record => {
+            // Aggregate call status counts
+            if (record.callstatus) {
+                callStatusMap.set(record.callstatus, 
+                    (callStatusMap.get(record.callstatus) || 0) + record.count
+                );
+            }
+
+            // Aggregate date-wise counts
+            if (record.callDate) {
+                dateWiseMap.set(record.callDate, 
+                    (dateWiseMap.get(record.callDate) || 0) + record.count
+                );
+            }
+        });
+
+        // Convert maps to arrays
+        const callStatus = Array.from(callStatusMap.entries()).map(([callstatus, tcount]) => ({
+            callstatus,
+            tcount
         }));
+
+        // Format date-wise data
+        const formattedCallingDoneByDate = Array.from(dateWiseMap.entries())
+            .sort(([dateA], [dateB]) => new Date(dateB) - new Date(dateA))
+            .map(([date, sbcount]) => ({
+                submiton: new Date(date).toLocaleDateString('en-GB', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: '2-digit'
+                }).replace(/ /g, '-'),
+                sbcount
+            }));
 
         res.status(200).json({
             success: true,
             data: {
                 databaseSummary: {
-                    totalData: totalData[0].TotalData,
-                    callingDone: callingDone[0].callingdone,
-                    pending: pending[0].pending,
+                    totalData: summaryData[0].TotalData,
+                    callingDone: summaryData[0].callingdone,
+                    pending: summaryData[0].pending,
                     callStatusDistribution: callStatus
                 },
-                callingDoneByDate: formattedCallingDoneByDate
+                callingDoneByDate: formattedCallingDoneByDate,
+                performance: {
+                    queryCount: 2, // Reduced from 5 queries to 2
+                    optimization: 'single_query_aggregation'
+                }
             }
         });
     } catch (error) {

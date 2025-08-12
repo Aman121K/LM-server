@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 const db = require('./config/db');
+const performance = require('./middleware/performance');
 
 const app = express();
 
@@ -18,6 +19,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(performance); // Add performance monitoring
 
 // Test database connection
 db.getConnection()
@@ -32,9 +34,11 @@ db.getConnection()
 // Routes
 const leadRoutes = require('./routes/lead.routes');
 const userRoutes = require('./routes/user.routes');
+const adminRoutes = require('../routes/admin');
 
 app.use('/api/leads', leadRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
