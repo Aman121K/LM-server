@@ -129,7 +129,7 @@ exports.getLeadsByCallStatus = async (req, res) => {
     try {
         const { callStatus, callby, startDate, endDate, ContactNumber, productname, page = 1, limit = 10 } = req.query;
         const { offset, page: pageNum, limit: limitNum } = getPaginationParams(page, limit);
-        
+
         console.log("Query params:", { callStatus, callby, startDate, endDate, ContactNumber, productname, page: pageNum, limit: limitNum });
 
         // Validate and sanitize parameters
@@ -149,7 +149,7 @@ exports.getLeadsByCallStatus = async (req, res) => {
             conditions.push('tm.callstatus = ""');
         }
 
-        if (productname && productname.toLowerCase() !== 'all' && productname.trim() !== '') {
+        if (productname && productname.toLowerCase() !== 'all') {
             conditions.push('tm.productname = ?');
             params.push(productname);
         }
@@ -170,7 +170,7 @@ exports.getLeadsByCallStatus = async (req, res) => {
 
         // OPTIMIZATION 2: Start with fast query first
         let query = 'SELECT * FROM tblmaster tm';
-        
+
         // Add WHERE clause
         if (conditions.length > 0) {
             query += ' WHERE ' + conditions.join(' AND ');
@@ -182,20 +182,20 @@ exports.getLeadsByCallStatus = async (req, res) => {
             FROM tblmaster tm
             ${conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''}
         `;
-        
+
         const [totalCount] = await db.execute(countQuery, params);
 
         // OPTIMIZATION 3: Try fast query first, fallback to detailed query if needed
         try {
             // Set a timeout for the main query
             const queryPromise = db.execute(query + ' ORDER BY tm.id DESC LIMIT ? OFFSET ?', [...params, limitNum, offset]);
-            
+
             const timeoutPromise = new Promise((_, reject) => {
                 setTimeout(() => reject(new Error('Query timeout')), queryTimeout);
             });
 
             const [leads] = await Promise.race([queryPromise, timeoutPromise]);
-            
+
             console.log("Fast query completed successfully:", leads.length, "leads found");
 
             const paginatedResponse = createPaginationResponse(
@@ -213,7 +213,7 @@ exports.getLeadsByCallStatus = async (req, res) => {
 
         } catch (timeoutError) {
             console.log("Fast query timed out, falling back to detailed query...");
-            
+
             // OPTIMIZATION 4: Fallback to detailed query with task history
             let detailedQuery = `
                 SELECT 
@@ -239,10 +239,10 @@ exports.getLeadsByCallStatus = async (req, res) => {
 
             // Add pagination and ordering
             detailedQuery += ' ORDER BY tm.id DESC LIMIT ? OFFSET ?';
-            
+
             try {
                 const [leads] = await db.execute(detailedQuery, [...params, limitNum, offset]);
-                
+
                 console.log("Detailed query completed:", leads.length, "leads found");
 
                 const paginatedResponse = createPaginationResponse(
@@ -260,16 +260,16 @@ exports.getLeadsByCallStatus = async (req, res) => {
 
             } catch (detailedError) {
                 console.log("Detailed query also failed, using basic query...");
-                
+
                 // OPTIMIZATION 5: Final fallback to basic query without any JOINs
                 const basicQuery = `
                     SELECT * FROM tblmaster tm
                     ${conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''}
                     ORDER BY tm.id DESC LIMIT ? OFFSET ?
                 `;
-                
+
                 const [leads] = await db.execute(basicQuery, [...params, limitNum, offset]);
-                
+
                 console.log("Basic query completed:", leads.length, "leads found");
 
                 const paginatedResponse = createPaginationResponse(
@@ -400,7 +400,7 @@ exports.updateLead = async (req, res) => {
 
         // OPTIMIZATION 3: Execute update and history insert in parallel
         const updateQuery = `UPDATE tblmaster SET ${updateFields.join(', ')} WHERE id = ?`;
-        
+
         const [updateResult, historyResult] = await Promise.all([
             db.execute(updateQuery, params),
             db.execute(
@@ -967,14 +967,14 @@ exports.getUserDashboardData = async (req, res) => {
         callData.forEach(record => {
             // Aggregate call status counts
             if (record.callstatus) {
-                callStatusMap.set(record.callstatus, 
+                callStatusMap.set(record.callstatus,
                     (callStatusMap.get(record.callstatus) || 0) + record.count
                 );
             }
 
             // Aggregate date-wise counts
             if (record.callDate) {
-                dateWiseMap.set(record.callDate, 
+                dateWiseMap.set(record.callDate,
                     (dateWiseMap.get(record.callDate) || 0) + record.count
                 );
             }
@@ -1268,7 +1268,7 @@ exports.getDailyCallCompletionByTL = async (req, res) => {
         // Build date condition
         let dateCondition = '';
         let params = [];
-        
+
         if (startDate && endDate) {
             dateCondition = 'AND DATE(tah.callDoneAt) BETWEEN ? AND ?';
             params.push(startDate, endDate);
@@ -1301,7 +1301,7 @@ exports.getDailyCallCompletionByTL = async (req, res) => {
         allData.forEach(record => {
             const date = new Date(record.callDate);
             const formattedDate = `${date.getDate()}/${date.toLocaleDateString('en-GB', { month: 'short' })}/${date.getFullYear()}`;
-            
+
             // Initialize date entry if it doesn't exist
             if (!dateMap.has(formattedDate)) {
                 dateMap.set(formattedDate, {
@@ -1309,9 +1309,9 @@ exports.getDailyCallCompletionByTL = async (req, res) => {
                     tls: new Map()
                 });
             }
-            
+
             const dateEntry = dateMap.get(formattedDate);
-            
+
             // Initialize TL entry if it doesn't exist
             if (!dateEntry.tls.has(record.tlUsername)) {
                 dateEntry.tls.set(record.tlUsername, {
@@ -1320,9 +1320,9 @@ exports.getDailyCallCompletionByTL = async (req, res) => {
                     users: []
                 });
             }
-            
+
             const tlEntry = dateEntry.tls.get(record.tlUsername);
-            
+
             // Add user data
             tlEntry.users.push({
                 userName: record.userName,
@@ -1337,11 +1337,11 @@ exports.getDailyCallCompletionByTL = async (req, res) => {
                 date: formattedDate,
                 tls: []
             };
-            
+
             dateEntry.tls.forEach((tlEntry, tlUsername) => {
                 dateReport.tls.push(tlEntry);
             });
-            
+
             report.push(dateReport);
         });
 
@@ -1363,7 +1363,7 @@ exports.getDataByCallStatusFromTlName = async (req, res) => {
     try {
         const { callStatus, tlName, page = 1, limit = 10 } = req.query;
         const { offset, page: pageNum, limit: limitNum } = getPaginationParams(page, limit);
-        
+
         console.log("Query params:", { callStatus, tlName, page: pageNum, limit: limitNum });
 
         if (!tlName) {
