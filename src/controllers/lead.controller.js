@@ -929,8 +929,8 @@ exports.getUserDashboardData = async (req, res) => {
         const [summaryData] = await db.execute(
             `SELECT 
                 COUNT(*) as TotalData,
-                SUM(CASE WHEN callstatus != "" THEN 1 ELSE 0 END) as callingdone,
-                SUM(CASE WHEN callstatus = "" THEN 1 ELSE 0 END) as pending
+                SUM(CASE WHEN submiton IS NOT NULL AND submiton != "" THEN 1 ELSE 0 END) as callingdone,
+                SUM(CASE WHEN submiton IS NULL OR submiton = "" THEN 1 ELSE 0 END) as pending
              FROM tblmaster 
              WHERE callby = ?`,
             [callBy]
@@ -1452,6 +1452,93 @@ exports.getDataByCallStatusFromTlName = async (req, res) => {
         res.status(500).json({
             success: false,
             message: error.message
+        });
+    }
+};
+
+exports.getCallStatusStatistics = async (req, res) => {
+    try {
+        // Define the call statuses we want to track
+        const callStatuses = [
+            'details shared',
+            'Resale-buyer',
+            'warm',
+            'site visit planned',
+            'site visit planned (this week)',
+            'site visit done'
+        ];
+
+        // Single optimized query to get only the specified call statuses
+        const query = `
+            SELECT 
+                u.id as userId,
+                u.Username as username,
+                u.FullName as fullName,
+                u.UserEmail as email,
+                u.tl_name as tlName,
+                m.callstatus,
+                COUNT(*) as count
+            FROM tblusers u
+            LEFT JOIN tblmaster m ON u.Username = m.callby 
+                AND m.callstatus IN (?, ?, ?, ?, ?, ?)
+            WHERE u.id IS NOT NULL
+            GROUP BY u.id, u.Username, u.FullName, u.UserEmail, u.tl_name, m.callstatus
+            ORDER BY u.FullName, m.callstatus
+        `;
+
+        const [results] = await db.execute(query, callStatuses);
+
+        // Process results to group by user
+        const userStatistics = {};
+        
+        results.forEach(row => {
+            if (!userStatistics[row.userId]) {
+                userStatistics[row.userId] = {
+                    userId: row.userId,
+                    username: row.username,
+                    fullName: row.fullName,
+                    email: row.email,
+                    tlName: row.tlName,
+                    callStatusCounts: {},
+                    totalCalls: 0
+                };
+            }
+            
+            if (row.callstatus) {
+                userStatistics[row.userId].callStatusCounts[row.callstatus] = row.count;
+                userStatistics[row.userId].totalCalls += row.count;
+            }
+        });
+
+        // Convert to array and ensure all call statuses are present (even if 0)
+        const userStatsArray = Object.values(userStatistics).map(user => {
+            callStatuses.forEach(status => {
+                if (!user.callStatusCounts[status]) {
+                    user.callStatusCounts[status] = 0;
+                }
+            });
+            return user;
+        });
+
+        // Calculate summary totals (only from specified call statuses)
+        const summaryTotalCalls = userStatsArray.reduce((sum, user) => sum + user.totalCalls, 0);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                callStatuses: callStatuses,
+                userStatistics: userStatsArray,
+                summary: {
+                    totalUsers: userStatsArray.length,
+                    totalCalls: summaryTotalCalls
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Get call status statistics error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching call status statistics'
         });
     }
 };

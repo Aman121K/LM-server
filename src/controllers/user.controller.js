@@ -298,7 +298,7 @@ exports.getTls = async (req, res) => {
 };
 exports.allUserList = async (req, res) => {
     try {
-        const { page = 1, limit = 10 } = req.query;
+        const { page = 1, limit = 100 } = req.query;
         const { offset, page: pageNum, limit: limitNum } = getPaginationParams(page, limit);
 
         // Get total count

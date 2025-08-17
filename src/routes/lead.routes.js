@@ -70,4 +70,8 @@ router.get('/daily-call-completion-by-tl', leadController.getDailyCallCompletion
 // Get leads by TL name and call status
 router.get('/tl-data', leadController.getDataByCallStatusFromTlName);
 
+// callStatics for every users 
+
+router.get('/all-call-status-statistics', leadController.getCallStatusStatistics);
+
 module.exports = router; 
