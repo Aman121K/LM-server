@@ -593,49 +593,39 @@ exports.getLeadsByDateRange = async (req, res) => {
     try {
         const { date, callBy } = req.body;
 
-        // OPTIMIZATION: Query task_assign_history directly instead of tblmaster
-        // Get all call records for the specific date and user
-        const [callRecords] = await db.execute(
+        // OPTIMIZATION: Query tblmaster directly instead of task_assign_history
+        // Get all leads for the specific date and user
+        const [leads] = await db.execute(
             `SELECT 
-                leadId,
-                status as callstatus,
-                callDoneAt,
-                callDoneBy,
-                assignTo,
-                assignFrom,
-                createdAt
-             FROM ssuqgpoy_dashboard_1.task_assign_history 
-             WHERE DATE(callDoneAt) = ? 
-             AND assignFrom = ?
-             ORDER BY callDoneAt DESC`,
+                id,
+                FirstName,
+                LastName,
+                EmailId,
+                ContactNumber,
+                callstatus,
+                remarks,
+                PostingDate,
+                callby,
+                submiton,
+                productname,
+                unittype,
+                budget,
+                followup
+             FROM tblmaster 
+             WHERE DATE(submiton) = ? 
+             AND callby = ?
+             AND callstatus != ""
+             ORDER BY submiton DESC`,
             [date, callBy]
         );
 
-        // Get call status counts - count ALL records, not just unique leads
-        const statusCounts = callRecords.reduce((acc, record) => {
-            if (record.callstatus && record.callstatus !== '') {
-                acc[record.callstatus] = (acc[record.callstatus] || 0) + 1;
+        // Get call status counts from tblmaster
+        const statusCounts = leads.reduce((acc, lead) => {
+            if (lead.callstatus && lead.callstatus !== '') {
+                acc[lead.callstatus] = (acc[lead.callstatus] || 0) + 1;
             }
             return acc;
         }, {});
-
-        // Get unique leads with their latest call status
-        const leadsMap = new Map();
-        callRecords.forEach(record => {
-            if (!leadsMap.has(record.leadId)) {
-                leadsMap.set(record.leadId, {
-                    id: record.leadId,
-                    callstatus: record.callstatus,
-                    callDoneAt: record.callDoneAt,
-                    callDoneBy: record.callDoneBy,
-                    assignTo: record.assignTo,
-                    assignFrom: record.assignFrom,
-                    createdAt: record.createdAt
-                });
-            }
-        });
-
-        const leads = Array.from(leadsMap.values());
 
         res.status(200).json({
             success: true,
@@ -643,9 +633,8 @@ exports.getLeadsByDateRange = async (req, res) => {
                 leads,
                 statusCounts,
                 totalLeads: leads.length,
-                totalCallRecords: callRecords.length, // Add this to show total call records
                 queryType: 'optimized',
-                dataSource: 'task_assign_history_only'
+                dataSource: 'tblmaster_only'
             }
         });
     } catch (error) {
@@ -947,16 +936,16 @@ exports.getUserDashboardData = async (req, res) => {
             [callBy]
         );
 
-        // OPTIMIZATION: Single query to get call status distribution and date-wise data
+        // OPTIMIZATION: Single query to get call status distribution and date-wise data from tblmaster
         const [callData] = await db.execute(
             `SELECT 
-                status as callstatus,
-                DATE(callDoneAt) as callDate,
+                callstatus,
+                DATE(submiton) as callDate,
                 COUNT(*) as count
-             FROM ssuqgpoy_dashboard_1.task_assign_history 
-             WHERE assignFrom = ? AND callDoneAt IS NOT NULL AND status != ""
-             GROUP BY status, DATE(callDoneAt)
-             ORDER BY callDate DESC, status`,
+             FROM tblmaster 
+             WHERE callby = ? AND callstatus != "" AND submiton IS NOT NULL
+             GROUP BY callstatus, DATE(submiton)
+             ORDER BY callDate DESC, callstatus`,
             [callBy]
         );
 
@@ -985,7 +974,6 @@ exports.getUserDashboardData = async (req, res) => {
             callstatus,
             tcount
         }));
-        console.log("callStatus>>");
 
         // Format date-wise data
         const formattedCallingDoneByDate = Array.from(dateWiseMap.entries())
@@ -1011,7 +999,8 @@ exports.getUserDashboardData = async (req, res) => {
                 callingDoneByDate: formattedCallingDoneByDate,
                 performance: {
                     queryCount: 2, // Reduced from 5 queries to 2
-                    optimization: 'single_query_aggregation'
+                    optimization: 'single_query_aggregation',
+                    table: 'tblmaster' // Now using tblmaster instead of task_assign_history
                 }
             }
         });
