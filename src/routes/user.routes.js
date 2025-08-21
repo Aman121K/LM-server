@@ -7,6 +7,8 @@ const auth = require('../middleware/auth');
 router.post('/register', userController.register);
 router.post('/login', userController.login);
 router.post('/forgot-password', userController.forgotPassword);
+router.post('/reset-password', userController.resetPassword);
+router.get('/verify-reset-token/:token', userController.verifyResetToken);
 router.get('/tl', userController.getTls);
 router.get('/allUserList', userController.allUserList);
 

@@ -178,13 +178,13 @@ exports.getCurrentUser = async (req, res) => {
     }
 };
 
-// Forgot Password
+// Forgot Password - Generate reset token and send email
 exports.forgotPassword = async (req, res) => {
     try {
         const { email } = req.body;
 
         // Check if user exists
-        console.log("email>>", email)
+        console.log("Forgot password request for email:", email);
         const [users] = await db.execute(
             'SELECT * FROM tblusers WHERE UserEmail = ?',
             [email]
@@ -197,46 +197,77 @@ exports.forgotPassword = async (req, res) => {
             });
         }
 
-        // Generate a random password
-        const newPassword = Math.random().toString(36).slice(-8);
+        const user = users[0];
 
-        // Hash the new password
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(newPassword, salt);
+        // Generate a secure random token
+        const crypto = require('crypto');
+        const resetToken = crypto.randomBytes(32).toString('hex');
+        const resetTokenExpiry = new Date(Date.now() + 3600000); // 1 hour from now
 
-        // Update user's password in database
-        await db.execute(
-            'UPDATE tblusers SET Password = ? WHERE UserEmail = ?',
-            [hashedPassword, email]
-        );
+        // Store the reset token in database (you'll need to create this table)
+        try {
+            await db.execute(
+                'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE token = ?, expires_at = ?',
+                [user.id, resetToken, resetTokenExpiry, resetToken, resetTokenExpiry]
+            );
+        } catch (error) {
+            // If table doesn't exist, create it
+            if (error.code === 'ER_NO_SUCH_TABLE') {
+                await db.execute(`
+                    CREATE TABLE password_reset_tokens (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        user_id INT NOT NULL,
+                        token VARCHAR(255) NOT NULL UNIQUE,
+                        expires_at DATETIME NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES tblusers(id) ON DELETE CASCADE
+                    )
+                `);
+                await db.execute(
+                    'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)',
+                    [user.id, resetToken, resetTokenExpiry]
+                );
+            } else {
+                throw error;
+            }
+        }
 
         // Create email transporter
-
         const transporter = nodemailer.createTransport({
-            service: 'Gmail', // For example, 'Gmail'
+            service: 'Gmail',
             auth: {
                 user: 'javascript.pgl@gmail.com',
                 pass: 'msdf qhmj fhbv xlbm'
             }
         });
-        // const transporter = nodemailer.createTransport({
-        //     service: 'gmail',
-        //     auth: {
-        //         user: 'reactjs.pgl@gmail.com',
-        //         pass: 'Vikas@123@'
-        //     }
-        // });
+
+        // Create reset URL
+        const resetUrl = `${req.protocol}://${req.get('host')}/reset-password?token=${resetToken}`;
 
         // Email content
         const mailOptions = {
-            from: process.env.EMAIL_USER,
+            from: 'javascript.pgl@gmail.com',
             to: email,
-            subject: 'Password Reset - Lead Management System',
+            subject: 'Password Reset Request - Lead Management System',
             html: `
-                <h1>Password Reset</h1>
-                <p>Your new password is: <strong>${newPassword}</strong></p>
-                <p>Please login with this password and change it immediately for security reasons.</p>
-                <p>If you didn't request this password reset, please contact support immediately.</p>
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #333; text-align: center;">Password Reset Request</h2>
+                    <p>Hello ${user.FullName},</p>
+                    <p>You have requested to reset your password for the Lead Management System.</p>
+                    <p>Click the button below to reset your password:</p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="${resetUrl}" 
+                           style="background-color: #007bff; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
+                            Reset Password
+                        </a>
+                    </div>
+                    <p>Or copy and paste this link in your browser:</p>
+                    <p style="word-break: break-all; color: #666;">${resetUrl}</p>
+                    <p><strong>This link will expire in 1 hour for security reasons.</strong></p>
+                    <p>If you didn't request this password reset, please ignore this email or contact support immediately.</p>
+                    <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+                    <p style="color: #666; font-size: 12px;">This is an automated message from the Lead Management System.</p>
+                </div>
             `
         };
 
@@ -245,13 +276,99 @@ exports.forgotPassword = async (req, res) => {
 
         res.status(200).json({
             success: true,
-            message: 'New password has been sent to your email'
+            message: 'Password reset link has been sent to your email'
         });
     } catch (error) {
         console.error('Forgot password error:', error);
         res.status(500).json({
             success: false,
-            message: 'Error processing password reset'
+            message: 'Error processing password reset request'
+        });
+    }
+};
+
+// Reset Password - Verify token and update password
+exports.resetPassword = async (req, res) => {
+    try {
+        const { token, newPassword } = req.body;
+
+        if (!token || !newPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'Token and new password are required'
+            });
+        }
+
+        // Find the reset token
+        const [tokens] = await db.execute(
+            'SELECT * FROM password_reset_tokens WHERE token = ? AND expires_at > NOW()',
+            [token]
+        );
+
+        if (tokens.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid or expired reset token'
+            });
+        }
+
+        const resetToken = tokens[0];
+
+        // Hash the new password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        // Update user's password
+        await db.execute(
+            'UPDATE tblusers SET Password = ? WHERE id = ?',
+            [hashedPassword, resetToken.user_id]
+        );
+
+        // Delete the used token
+        await db.execute(
+            'DELETE FROM password_reset_tokens WHERE token = ?',
+            [token]
+        );
+
+        res.status(200).json({
+            success: true,
+            message: 'Password has been reset successfully'
+        });
+    } catch (error) {
+        console.error('Reset password error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error resetting password'
+        });
+    }
+};
+
+// Verify reset token (for frontend validation)
+exports.verifyResetToken = async (req, res) => {
+    try {
+        const { token } = req.params;
+
+        const [tokens] = await db.execute(
+            'SELECT * FROM password_reset_tokens WHERE token = ? AND expires_at > NOW()',
+            [token]
+        );
+
+        if (tokens.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid or expired reset token'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Token is valid'
+        });
+    } catch (error) {
+        console.error('Verify token error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error verifying token'
         });
     }
 };

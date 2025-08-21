@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 require('dotenv').config();
 const db = require('./config/db');
 const performance = require('./middleware/performance');
@@ -21,6 +22,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(performance); // Add performance monitoring
 
+// Serve static files from public directory
+app.use(express.static(path.join(__dirname, '../public')));
+
 // Test database connection
 db.getConnection()
     .then(connection => {
@@ -39,6 +43,11 @@ const adminRoutes = require('../routes/admin');
 app.use('/api/leads', leadRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
+
+// Serve reset password page
+app.get('/reset-password', (req, res) => {
+    res.sendFile(path.join(__dirname, '../public/reset-password.html'));
+});
 
 // Error handling middleware
 app.use((err, req, res, next) => {

@@ -9,7 +9,8 @@
     "optimize-db": "node src/config/optimize-db.js",
     "test-performance": "node src/utils/performance-test.js",
     "test-upload": "node src/utils/upload-performance-test.js",
-    "create-template": "node src/utils/create-upload-template.js"
+    "create-template": "node src/utils/create-upload-template.js",
+    "setup-reset-tokens": "node src/config/create-reset-tokens-table.js"
   },
   "keywords": [],
   "author": "",
